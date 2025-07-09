@@ -1,0 +1,48 @@
+@import url(https://fonts.googleapis.com/css?family=Open+Sans:600);
+
+.webgl {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  outline: none;
+  background-color: #643333;
+  cursor: move;
+  /* fallback if grab cursor is unsupported */
+  cursor: grabbing;
+  cursor: -moz-grabbing;
+  cursor: -webkit-grabbing;
+}
+
+#credits {
+  position: absolute;
+  width: 100%;
+  margin: auto;
+  bottom: 0;
+  margin-bottom: 20px;
+  font-family: "Open Sans", sans-serif;
+  color: #503c28;
+  font-size: 0.7em;
+  text-transform: uppercase;
+  text-align: center;
+}
+#credits a {
+  color: #34a5cb;
+}
+
+#credits a:hover {
+  color: #ff3434;
+}
+
+#instructions{
+  position: absolute;
+  width: 100%;
+  margin: auto;
+  bottom: 60px;
+  font-family: "Open Sans", sans-serif;
+  color: #ff3434;
+  font-size: 0.7em;
+  text-transform: uppercase;
+  text-align: center;
+}
