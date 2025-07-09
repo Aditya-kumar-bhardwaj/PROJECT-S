@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Employee Information</title>
+    <script DEFER src="/Face-Detection-master/js/face-api.min.js"></script>
+    <script DEFER src="/Face-Detection-master/js/main.js"></script>
+</head>
+    <style>
+        /* Basic styling */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        /* Container for the form and table */
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .hading {
+            text-align: center;
+            color: #d44545;
+
+            text-shadow: 3px 2px 5px  #d445ca;
+        }
+
+        /* Form styling */
+        form {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            margin-bottom: 30px;
+        }
+
+        form label {
+            width: 100%;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        form input[type="text"], form input[type="number"] {
+            padding: 10px;
+            width: 48%;
+            margin-bottom: 15px;
+            box-sizing: border-box;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+
+        form button {
+            padding: 12px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+            border-radius: 5px;
+        }
+
+        form button:hover {
+            background-color: #45a049;
+        }
+
+        /* Table styling */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            box-shadow: 3px 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        table, th, td {
+            border: 1px solid #ddd;
+        }
+
+        th {
+            background-color: #709bcc;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: bold;
+        }
+
+        td {
+            padding: 12px;
+            text-align: left;
+        }
+
+        /* Responsive styling */
+        @media (max-width: 768px) {
+            form input[type="text"], form input[type="number"] {
+                width: 100%; /* Make input fields full-width on smaller screens */
+            }
+
+            form {
+                flex-direction: column; /* Stack form elements vertically */
+            }
+
+            form button {
+                width: 100%; /* Button full-width on small screens */
+            }
+
+            /* Adjust table layout for smaller screens */
+            table {
+                font-size: 14px;
+            }
+
+            th, td {
+                padding: 8px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            h2 {
+                font-size: 18px; /* Adjust title size on very small screens */
+            }
+
+            form input[type="text"], form input[type="number"] {
+                padding: 8px;
+            }
+
+            form button {
+                font-size: 14px;
+            }
+
+            table {
+                font-size: 12px; /* Reduce font size for table on smaller devices */
+            }
+
+            th, td {
+                padding: 6px;
+            }
+        }
+    </style>
+
+<body>
+    <header>
+        <link rel="stylesheet" href="styles.css">
+        <link rel="stylesheet" href="/Face-Detection-master/js/main.js">
+        <link rel="stylesheet" href="/Face-Detection-master/js/face-api.min.js">
+        <nav><div class="logo"><img src="https://cdn-icons-png.flaticon.com/128/18456/18456970.png"></div>
+            <ul>
+                <li></li>
+                <li><a href="/home.html"><h2>⌂Home</h2></a></li>
+                <li><a href="/about.html"><h2>About Us</h2></a></li>
+                <li><a href="#services"><h2>Services</h2></a></li>
+                <li><a href="/contact.html"><h2>Contact</h2></a></li>
+                <li><a href="/employees.html"><h2>Employee Management</h2></a></li>
+                <right><li><!--<input type="text" name="searchBOX" id="search" placeholder="SEARCH">  -->
+                    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+
+                    <!-- form -->
+                    <form class="example" action="/action_page.php">
+                    <input type="text" placeholder="Search..." name="search">
+                    <button type="submit"><i class="fa fa-search"></i></button> 
+                    </form> </li></right>
+            </ul>
+        </nav>
+    </header>
+
+    <main>
+        <video id="video" height="560" width="720" autoplay muted></video>
+    </main>
+
+    <div class="container">
+        <h2 class="hading">Enter Employee Information</h2>
+
+        <form id="employeeForm">
+            <div>
+                <label for="name">Name:</label>
+                <input type="text" id="name" required>
+            </div>
+            <div>
+                <label for="age">Age:</label>
+                <input type="number" id="age" required>
+            </div>
+            <div>
+                <label for="position">Position:</label>
+                <input type="text" id="position" required>
+            </div>
+            <div>
+                <label for="salary">Salary:</label>
+                <input type="number" id="salary" required>
+            </div>
+            <div>
+                <button type="submit">Submit</button>
+            </div>
+        </form>
+
+        <h2>Employee Information</h2>
+        <table id="employeeTable">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Age</th>
+                    <th>Position</th>
+                    <th>Salary</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Employee data will be inserted here -->
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        // Get form and table elements
+        const form = document.getElementById('employeeForm');
+        const employeeTable = document.getElementById('employeeTable').getElementsByTagName('tbody')[0];
+
+        // Add an event listener to the form for submission
+        form.addEventListener('submit', function(event) {
+            event.preventDefault(); // Prevent page reload
+
+            // Get values from the form
+            const name = document.getElementById('name').value;
+            const age = document.getElementById('age').value;
+            const position = document.getElementById('position').value; 
+            const salary = document.getElementById('salary').value;
+
+            // Create a new row
+            const newRow = employeeTable.insertRow();
+
+            // Insert cells and populate with employee data
+            const cell1 = newRow.insertCell(0);
+            const cell2 = newRow.insertCell(1);
+            const cell3 = newRow.insertCell(2);
+            const cell4 = newRow.insertCell(3);
+
+            cell1.textContent = name;
+            cell2.textContent = age;
+            cell3.textContent = position;
+            cell4.textContent = salary;
+
+            // Clear the form inputs
+            form.reset();
+        });
+    </script>
+
+</body>
+</html>
