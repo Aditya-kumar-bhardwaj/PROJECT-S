@@ -1,0 +1,2496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FaceTrack ERP | Intelligent Attendance System</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Face API (TensorFlow.js wrapper) -->
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    
+    <!-- Leaflet Maps -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class', 
+            theme: {
+                extend: {
+                    colors: {
+                        erp: { bg: '#f8fafc', surface: '#ffffff', primary: '#3b82f6', secondary: '#64748b', dark: '#0f172a' }
+                    },
+                    fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui'] }
+                }
+            }
+        }
+    </script>
+    
+    <!-- Prevent Flash of Unstyled Content (FOUC) for Dark Mode -->
+    <script>
+        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+    </script>
+
+    <style>
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        .dark ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .dark ::-webkit-scrollbar-thumb { background: #334155; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .dark ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+        .chart-container { position: relative; width: 100%; max-width: 100%; height: 300px; max-height: 400px; }
+
+        .video-wrapper { 
+            position: relative; 
+            width: 100%; 
+            max-width: 640px; 
+            margin: 0 auto; 
+            border-radius: 12px; 
+            overflow: hidden; 
+            background-color: #000; 
+            aspect-ratio: 4/3; 
+        }
+        video { 
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); 
+        }
+        #overlay-canvas { 
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; transform: scaleX(-1); 
+        }
+
+        .glass-panel { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.5); }
+        .dark .glass-panel { background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(255, 255, 255, 0.1); }
+
+        @keyframes modalFadeIn { from { opacity: 0; transform: translateY(-10px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        .modal-animate { animation: modalFadeIn 0.2s ease-out forwards; }
+        
+        @keyframes toastSlide { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .toast-animate { animation: toastSlide 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+
+        #app-loader { transition: opacity 0.5s ease; }
+
+        /* Print Media Styles for PDF Export */
+        @media print {
+            /* Fix for multi-page printing: Unlock screen heights and remove scrollbars */
+            html, body { height: auto !important; overflow: visible !important; display: block !important; }
+            main { overflow: visible !important; height: auto !important; position: static !important; display: block !important; }
+            
+            aside, .md\:hidden, #mobile-menu, #app-loader, #toast-container, button, .no-print { display: none !important; }
+            main { padding: 0 !important; margin: 0 !important; background: transparent !important; }
+            .bg-white { box-shadow: none !important; border: 1px solid #ddd !important; }
+            * { color: black !important; text-shadow: none !important; }
+            
+            #view-reports { display: block !important; position: static !important; height: auto !important; overflow: visible !important; }
+            section:not(#view-reports) { display: none !important; }
+            
+            /* Table formatting for clean page breaks */
+            table { width: 100%; border-collapse: collapse; page-break-inside: auto; }
+            tr { page-break-inside: avoid !important; page-break-after: auto; }
+            thead { display: table-header-group; } 
+            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+            
+            /* Professional Print Watermark */
+            #print-watermark {
+                display: flex !important;
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                z-index: -1;
+                opacity: 0.06;
+                pointer-events: none;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+            }
+            #print-watermark .symbol { font-size: 180px; line-height: 1; margin-bottom: 20px; }
+            #print-watermark .text { font-size: 80px; font-weight: 900; letter-spacing: -2px; text-transform: uppercase; font-family: system-ui, sans-serif; }
+        }
+    </style>
+</head>
+<body class="bg-erp-bg dark:bg-slate-900 text-erp-dark dark:text-slate-100 font-sans h-screen flex overflow-hidden selection:bg-erp-primary selection:text-white relative transition-colors duration-200">
+
+    <!-- Print Watermark -->
+    <div id="print-watermark" class="hidden">
+        <div class="symbol">&#9745;</div>
+        <div class="text">FaceTrack</div>
+    </div>
+
+    <!-- Global App Loader -->
+    <div id="app-loader" class="fixed inset-0 z-[100] bg-slate-900 flex flex-col items-center justify-center text-white">
+        <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-erp-primary mb-4"></div>
+        <h2 class="text-2xl font-bold">FaceTrack ERP</h2>
+        <p class="text-slate-400 mt-2" id="loader-text">Downloading Face Recognition AI Models...</p>
+        <p class="text-xs text-slate-500 mt-1">(Please wait, this downloads ~5MB of weights initially)</p>
+    </div>
+
+    <!-- Toast Notifications Container -->
+    <div id="toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <!-- Sidebar -->
+    <aside class="w-64 bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 hidden md:flex flex-col z-20 shadow-lg transition-colors duration-200">
+        <div class="p-6 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center">
+            <h1 class="text-2xl font-bold text-erp-primary flex items-center gap-2"><span>&#9745;</span> FaceTrack</h1>
+        </div>
+
+        <nav class="flex-1 overflow-y-auto p-4 space-y-2">
+            <!-- Public Views -->
+            <button onclick="navTo('dashboard')" class="nav-item w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-lg bg-erp-primary text-white transition-colors" id="nav-dashboard"><span>&#128202;</span> Dashboard</button>
+            <button onclick="navTo('terminal')" class="nav-item w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-lg text-erp-secondary dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 hover:text-erp-primary transition-colors" id="nav-terminal"><span>&#128247;</span> Terminal Scanner</button>
+            
+            <!-- Theme Toggle Option -->
+            <button onclick="toggleTheme()" class="w-full flex justify-between items-center px-4 py-3 text-sm font-medium rounded-lg text-erp-secondary dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 hover:text-erp-primary transition-colors">
+                <div class="flex items-center gap-3"><span id="theme-icon">🌙</span> <span id="theme-text">Dark Mode</span></div>
+            </button>
+
+            <div class="pt-4 pb-2"><p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-4">Admin Data Control</p></div>
+            
+            <!-- Protected Views -->
+            <button onclick="requireAdmin(() => navTo('registration'))" class="nav-item w-full flex justify-between items-center px-4 py-3 text-sm font-medium rounded-lg text-erp-secondary dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 hover:text-erp-primary transition-colors" id="nav-registration">
+                <div class="flex items-center gap-3"><span>&#128248;</span> Face Registration</div><span class="text-xs">🔒</span>
+            </button>
+            <button onclick="requireAdmin(() => navTo('users'))" class="nav-item w-full flex justify-between items-center px-4 py-3 text-sm font-medium rounded-lg text-erp-secondary dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 hover:text-erp-primary transition-colors" id="nav-users">
+                <div class="flex items-center gap-3"><span>&#128101;</span> Employees</div><span class="text-xs">🔒</span>
+            </button>
+            <button onclick="requireAdmin(() => navTo('reports'))" class="nav-item w-full flex justify-between items-center px-4 py-3 text-sm font-medium rounded-lg text-erp-secondary dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 hover:text-erp-primary transition-colors" id="nav-reports">
+                <div class="flex items-center gap-3"><span>&#128196;</span> Activity Logs</div><span class="text-xs">🔒</span>
+            </button>
+            <button onclick="requireAdmin(() => openSettingsModal())" class="w-full flex justify-between items-center px-4 py-3 text-sm font-medium rounded-lg text-erp-secondary dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 hover:text-erp-primary transition-colors">
+                <div class="flex items-center gap-3"><span>&#9881;</span> Settings</div><span class="text-xs">🔒</span>
+            </button>
+        </nav>
+
+        <div class="p-4 border-t border-slate-100 dark:border-slate-700">
+            <button onclick="requireAdmin(() => openAdminPanel())" class="w-full bg-slate-50 dark:bg-slate-900 p-3 rounded-lg border border-slate-200 dark:border-slate-700 flex items-center justify-between hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors text-left group shadow-sm">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-full bg-erp-dark dark:bg-slate-700 flex items-center justify-center text-white font-bold text-xs">A</div>
+                    <div>
+                        <p class="text-xs font-bold text-erp-dark dark:text-slate-200 group-hover:text-erp-primary transition-colors">Admin Panel</p>
+                        <p class="text-[10px] text-rose-500 font-bold" id="admin-status-text">Locked</p>
+                    </div>
+                </div>
+                <span class="text-slate-400 group-hover:text-erp-primary transition-colors">⚙️</span>
+            </button>
+        </div>
+    </aside>
+
+    <!-- Mobile Header -->
+    <div class="md:hidden fixed top-0 w-full bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 z-30 px-4 py-3 flex justify-between items-center shadow-sm transition-colors duration-200">
+        <h1 class="text-xl font-bold text-erp-primary">FaceTrack ERP</h1>
+        <button onclick="toggleMobileMenu()" class="text-2xl text-erp-secondary dark:text-slate-300">&#9776;</button>
+    </div>
+
+    <!-- Mobile Menu Overlay -->
+    <div id="mobile-menu" class="fixed inset-0 bg-white dark:bg-slate-900 z-40 hidden flex-col pt-16 px-6 space-y-4 transition-colors duration-200">
+        <button onclick="toggleMobileMenu(); navTo('dashboard')" class="text-lg font-medium text-erp-dark dark:text-white py-2 border-b dark:border-slate-700">Dashboard</button>
+        <button onclick="toggleMobileMenu(); navTo('terminal')" class="text-lg font-medium text-erp-dark dark:text-white py-2 border-b dark:border-slate-700">Terminal Scanner</button>
+        <button onclick="toggleTheme()" class="flex justify-between items-center text-lg font-medium text-erp-dark dark:text-white py-2 border-b dark:border-slate-700">
+            <span id="mobile-theme-text">Dark Mode</span> <span id="mobile-theme-icon">🌙</span>
+        </button>
+        <button onclick="toggleMobileMenu(); requireAdmin(() => navTo('registration'))" class="flex justify-between items-center text-lg font-medium text-erp-dark dark:text-white py-2 border-b dark:border-slate-700"><span>Face Registration</span> <span>🔒</span></button>
+        <button onclick="toggleMobileMenu(); requireAdmin(() => navTo('users'))" class="flex justify-between items-center text-lg font-medium text-erp-dark dark:text-white py-2 border-b dark:border-slate-700"><span>Employees</span> <span>🔒</span></button>
+        <button onclick="toggleMobileMenu(); requireAdmin(() => navTo('reports'))" class="flex justify-between items-center text-lg font-medium text-erp-dark dark:text-white py-2 border-b dark:border-slate-700"><span>Activity Logs</span> <span>🔒</span></button>
+        <button onclick="toggleMobileMenu(); requireAdmin(() => openSettingsModal())" class="flex justify-between items-center text-lg font-medium text-erp-dark dark:text-white py-2 border-b dark:border-slate-700"><span>Settings</span> <span>🔒</span></button>
+        <button onclick="toggleMobileMenu(); requireAdmin(() => openAdminPanel())" class="flex justify-between items-center text-lg font-medium text-erp-dark dark:text-white py-2 border-b dark:border-slate-700"><span>Admin Panel</span> <span>🔒</span></button>
+        <button onclick="toggleMobileMenu()" class="mt-8 text-sm text-erp-secondary dark:text-slate-400 text-center w-full">Close Menu</button>
+    </div>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 overflow-y-auto relative pt-16 md:pt-0 transition-colors duration-200 bg-slate-50 dark:bg-slate-900/50">
+        
+        <!-- Dashboard View -->
+        <section id="view-dashboard" class="p-6 md:p-8 space-y-6 animate-fade-in block">
+            
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 border-b border-slate-200 dark:border-slate-700 pb-4">
+                <div class="space-y-1">
+                    <h2 class="text-2xl font-bold text-erp-dark dark:text-white tracking-tight">Dashboard Overview</h2>
+                    <p class="text-erp-secondary dark:text-slate-400 text-sm font-medium flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                        <span id="dash-current-date">Loading date...</span>
+                    </p>
+                </div>
+                <div class="flex flex-wrap gap-3 w-full md:w-auto">
+                    <button onclick="navTo('terminal')" class="flex-1 md:flex-none px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 text-erp-dark dark:text-white text-sm font-bold rounded-lg shadow-sm hover:bg-slate-50 dark:hover:bg-slate-700 transition-all flex items-center justify-center gap-2">
+                        <span>📷</span> Open Scanner
+                    </button>
+                    <!-- NEW Ask AI Button -->
+                    <button onclick="document.getElementById('dash-ai-query-box').classList.toggle('hidden')" class="flex-1 md:flex-none px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold rounded-lg shadow-sm transition-all flex items-center justify-center gap-2">
+                        💬 Ask AI
+                    </button>
+                    <button onclick="generateDashboardInsights()" class="flex-1 md:flex-none px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg shadow-sm transition-all flex items-center justify-center gap-2">
+                        ✨ Generate AI Report
+                    </button>
+                </div>
+            </div>
+
+            <!-- AI Executive Summary Box -->
+            <div id="ai-insights-box" class="hidden bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-xl p-5 relative shadow-sm">
+                <div class="flex justify-between items-start mb-2">
+                    <h3 class="text-indigo-800 dark:text-indigo-300 font-bold text-sm flex items-center gap-2">✨ AI Executive Summary</h3>
+                    <button onclick="document.getElementById('ai-insights-box').classList.add('hidden')" class="text-indigo-400 hover:text-indigo-600 dark:hover:text-indigo-200">✕</button>
+                </div>
+                <div id="ai-insights-content" class="text-sm text-indigo-900 dark:text-indigo-200 leading-relaxed min-h-[40px]">...</div>
+            </div>
+
+            <!-- NEW: Ask AI Dashboard Query Box -->
+            <div id="dash-ai-query-box" class="hidden bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-xl p-5 relative shadow-sm mb-4">
+                <div class="flex justify-between items-start mb-2">
+                    <h3 class="text-purple-800 dark:text-purple-300 font-bold text-sm flex items-center gap-2">💬 Ask AI About Today's Attendance</h3>
+                    <button onclick="document.getElementById('dash-ai-query-box').classList.add('hidden')" class="text-purple-400 hover:text-purple-600 dark:hover:text-purple-200">✕</button>
+                </div>
+                <div class="flex gap-2">
+                    <input type="text" id="dash-ai-prompt" placeholder="Ask AI (e.g., 'Who is late today?')" class="flex-1 px-3 py-2 text-sm border border-purple-200 dark:border-purple-700 dark:bg-slate-800 dark:text-white rounded focus:border-purple-500" onkeyup="if(event.key === 'Enter') queryDashboardGemini()">
+                    <button onclick="queryDashboardGemini()" class="px-4 py-2 bg-purple-600 text-white rounded text-sm font-bold shadow-sm hover:bg-purple-700">Ask</button>
+                </div>
+                <div id="dash-ai-query-response" class="mt-3 text-sm text-purple-900 dark:text-purple-200 leading-relaxed hidden bg-white dark:bg-slate-800 p-3 rounded border border-purple-100 dark:border-purple-800"></div>
+            </div>
+
+            <!-- KPI Cards -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                <div class="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col justify-between">
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center text-lg shadow-inner">👥</div>
+                        <span class="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Total Staff</span>
+                    </div>
+                    <div>
+                        <p class="text-3xl font-black text-erp-dark dark:text-white" id="kpi-total">0</p>
+                        <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-1 font-medium">Registered in system</p>
+                    </div>
+                </div>
+
+                <div class="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col justify-between relative overflow-hidden">
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="w-10 h-10 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-lg shadow-inner">✅</div>
+                        <span class="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Present</span>
+                    </div>
+                    <div>
+                        <div class="flex items-end gap-2">
+                            <p class="text-3xl font-black text-erp-dark dark:text-white" id="kpi-present">0</p>
+                            <span class="text-sm font-bold text-emerald-500 mb-1" id="kpi-rate-text">0%</span>
+                        </div>
+                        <div class="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-1.5 mt-2 overflow-hidden">
+                            <div class="bg-emerald-500 h-1.5 rounded-full transition-all duration-1000" style="width: 0%" id="kpi-rate-bar"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col justify-between">
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="w-10 h-10 rounded-lg bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 flex items-center justify-center text-lg shadow-inner">⏰</div>
+                        <span class="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Late In</span>
+                    </div>
+                    <div>
+                        <p class="text-3xl font-black text-erp-dark dark:text-white" id="kpi-late">0</p>
+                        <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-1 font-medium">After <span id="kpi-shift-time" class="font-bold text-amber-600 dark:text-amber-400">09:00</span> shift start</p>
+                    </div>
+                </div>
+
+                <div class="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col justify-between">
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="w-10 h-10 rounded-lg bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 flex items-center justify-center text-lg shadow-inner">❌</div>
+                        <span class="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Absent / Leave</span>
+                    </div>
+                    <div>
+                        <div class="flex items-end gap-2">
+                            <p class="text-3xl font-black text-erp-dark dark:text-white" id="kpi-absent">0</p>
+                            <span class="text-sm font-bold text-purple-500 mb-1" id="kpi-leave-text">(0 on leave)</span>
+                        </div>
+                        <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-1 font-medium">Missing from roster</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts & Activity -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                
+                <div class="lg:col-span-2 bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col">
+                    <div class="flex justify-between items-center mb-6">
+                        <div>
+                            <h3 class="text-base font-bold text-erp-dark dark:text-white">Attendance Over Time</h3>
+                            <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Historical presence trend</p>
+                        </div>
+                        <select id="trend-time-filter" onchange="updateDashboardData()" class="text-xs border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-erp-dark dark:text-white rounded px-2 py-1.5 focus:outline-none focus:border-erp-primary transition-colors cursor-pointer">
+                            <option value="7">Last 7 Days</option>
+                            <option value="30">1 Month</option>
+                            <option value="90">3 Months</option>
+                            <option value="180">6 Months</option>
+                            <option value="365">1 Year</option>
+                        </select>
+                    </div>
+                    <div class="chart-container flex-1 min-h-[250px] md:min-h-[280px]"><canvas id="attendanceTrendChart"></canvas></div>
+                </div>
+                
+                <div class="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col">
+                    <div class="mb-6">
+                        <h3 class="text-base font-bold text-erp-dark dark:text-white">Demographics</h3>
+                        <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Workforce by department</p>
+                    </div>
+                    <div class="chart-container flex-1 min-h-[250px] flex items-center justify-center"><canvas id="deptChart"></canvas></div>
+                </div>
+
+                <div class="lg:col-span-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+                    <div class="px-6 py-5 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/50">
+                        <h3 class="text-sm font-bold text-erp-dark dark:text-white flex items-center gap-2"><span>⚡</span> Live Activity Feed</h3>
+                    </div>
+                    <div class="p-0 overflow-x-auto">
+                        <table class="w-full text-sm text-left">
+                            <thead class="text-xs text-slate-500 dark:text-slate-400 uppercase bg-slate-50 dark:bg-slate-800 border-b border-slate-100 dark:border-slate-700">
+                                <tr>
+                                    <th class="px-6 py-3 font-semibold">Employee</th>
+                                    <th class="px-6 py-3 font-semibold">Department</th>
+                                    <th class="px-6 py-3 font-semibold">Time</th>
+                                    <th class="px-6 py-3 font-semibold text-right">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dash-recent-logs" class="divide-y divide-slate-100 dark:divide-slate-700">
+                                <tr><td colspan="4" class="px-6 py-8 text-center text-slate-400 italic">No recent activity found.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+
+        <!-- Terminal Scanner View -->
+        <section id="view-terminal" class="p-6 md:p-8 space-y-8 hidden animate-fade-in">
+            <div class="flex flex-col md:flex-row justify-between md:items-end gap-4">
+                <div class="space-y-2">
+                    <h2 class="text-2xl font-bold text-erp-dark dark:text-white">Terminal Scanner</h2>
+                    <p class="text-erp-secondary dark:text-slate-400 text-sm">Turn on the camera, look at the screen, and click <strong>"MARK ATTENDANCE"</strong>.</p>
+                </div>
+                <div class="bg-slate-800 text-emerald-400 font-mono text-2xl px-6 py-3 rounded-lg shadow-inner border border-slate-700 text-center tracking-widest w-full md:w-auto" id="live-clock">
+                    00:00:00
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div class="lg:col-span-2 bg-black rounded-xl overflow-hidden shadow-xl relative border-4 border-slate-800 dark:border-slate-900">
+                    <div class="video-wrapper">
+                        <video id="term-webcam" autoplay playsinline muted></video>
+                        <canvas id="term-canvas" class="overlay-canvas"></canvas>
+                    </div>
+                    
+                    <div class="bg-slate-800 p-4 flex flex-col md:flex-row justify-between items-center gap-4">
+                        <div class="text-slate-400 text-xs flex flex-col">
+                            <span>STATUS: <span id="term-cam-status" class="text-slate-500">OFFLINE</span></span>
+                            <span>LIVENESS: <span id="term-liveness-status" class="text-slate-500 font-bold">OFF</span></span>
+                            <span>GPS LOCK: <span id="term-gps-status" class="text-slate-500 font-bold">WAITING</span></span>
+                        </div>
+                        <div class="flex flex-wrap justify-end gap-2">
+                            <button onclick="toggleTermCamera()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm font-bold rounded shadow transition-all disabled:opacity-50" id="btn-term-camera-power" disabled>
+                                TURN ON CAMERA
+                            </button>
+                            <button onclick="markAttendance()" class="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded shadow-lg shadow-emerald-500/20 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:transform-none disabled:hover:bg-emerald-600" id="btn-mark-attendance" disabled>
+                                MARK ATTENDANCE
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="lg:col-span-1 space-y-6 flex flex-col h-full">
+                    <div class="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex-1">
+                        <h3 class="text-sm font-bold text-erp-dark dark:text-white mb-4">Live Session Logs</h3>
+                        <div class="overflow-y-auto max-h-[400px] space-y-2 pr-2" id="terminal-log">
+                            <div class="text-xs text-center text-erp-secondary dark:text-slate-500 italic">Terminal inactive.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+
+        <!-- Face Registration View -->
+        <section id="view-registration" class="p-6 md:p-8 space-y-8 hidden animate-fade-in">
+            <div class="space-y-2">
+                <h2 class="text-2xl font-bold text-erp-dark dark:text-white flex items-center gap-2">Face Registration <span>🔒</span></h2>
+                <p class="text-erp-secondary dark:text-slate-400 text-sm">Enroll new employees into the facial recognition database.</p>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div class="bg-black rounded-xl overflow-hidden shadow-xl relative border-4 border-slate-800 dark:border-slate-900 h-fit">
+                    <div class="video-wrapper">
+                        <video id="reg-webcam" autoplay playsinline muted></video>
+                        <canvas id="reg-canvas" class="overlay-canvas"></canvas>
+                        <div class="absolute inset-0 pointer-events-none flex items-center justify-center">
+                            <div class="w-48 h-48 border-2 border-dashed border-white/50 rounded-lg"></div>
+                        </div>
+                        <div id="reg-success-overlay" class="absolute inset-0 z-20 flex flex-col items-center justify-center bg-emerald-500/80 backdrop-blur-sm opacity-0 pointer-events-none transition-opacity duration-300 hidden">
+                            <div class="w-20 h-20 bg-white rounded-full flex items-center justify-center text-4xl shadow-2xl animate-bounce">✅</div>
+                            <h3 class="text-white text-xl font-bold mt-4 shadow-sm drop-shadow-md">Registration Complete!</h3>
+                        </div>
+                    </div>
+                    <div class="bg-slate-800 p-4 flex justify-between items-center">
+                        <span class="text-slate-400 text-xs font-mono">ENROLLMENT_CAM: <span id="reg-cam-status" class="text-slate-500">OFF</span></span>
+                        <button onclick="toggleRegCamera()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold rounded transition-all" id="btn-reg-camera-power" disabled>
+                            START CAMERA
+                        </button>
+                    </div>
+                </div>
+
+                <div class="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-4 h-fit">
+                    <div class="border-b border-slate-100 dark:border-slate-700 pb-2">
+                        <h3 class="text-lg font-bold text-erp-dark dark:text-white">Employee Details</h3>
+                        <p class="text-xs text-erp-secondary dark:text-slate-400 mt-1">Complete profile details to train the AI model.</p>
+                    </div>
+                    <div class="space-y-3">
+                        <div>
+                            <label class="block text-xs font-bold text-erp-secondary dark:text-slate-400 mb-1">Employee ID *</label>
+                            <input type="text" id="reg-emp-id" placeholder="e.g. EMP-001" class="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded focus:border-erp-primary text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-erp-secondary dark:text-slate-400 mb-1">Full Name *</label>
+                            <input type="text" id="reg-name" placeholder="John Doe" class="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded focus:border-erp-primary text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-erp-secondary dark:text-slate-400 mb-1">Job Title / Role *</label>
+                            <input type="text" id="reg-role" placeholder="Software Engineer" class="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded focus:border-erp-primary text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-erp-secondary dark:text-slate-400 mb-1">Department *</label>
+                            <select id="reg-dept" class="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded focus:border-erp-primary text-sm bg-white dark:bg-slate-700">
+                                <option value="">Select Department...</option>
+                                <option>Engineering</option><option>Human Resources</option><option>Sales</option><option>Management</option><option>Operations</option>
+                            </select>
+                        </div>
+                        <div class="pt-2">
+                            <button onclick="registerUser()" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded shadow text-sm transition-all disabled:opacity-50" id="btn-register" disabled>
+                                EXTRACT FACE & REGISTER
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+
+        <!-- User Management View -->
+        <section id="view-users" class="p-6 md:p-8 space-y-6 hidden animate-fade-in">
+            <div class="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 border-b border-slate-200 dark:border-slate-700 pb-4">
+                <div class="space-y-1">
+                    <div class="flex items-center gap-3">
+                        <h2 class="text-2xl font-bold text-erp-dark dark:text-white flex items-center gap-2">Employee Database <span>🔒</span></h2>
+                        <span id="user-count-badge" class="bg-blue-100 text-blue-800 text-xs font-bold px-2.5 py-1 rounded-full dark:bg-blue-900/50 dark:text-blue-300 border border-blue-200 dark:border-blue-800">Total: 0</span>
+                    </div>
+                    <p class="text-erp-secondary dark:text-slate-400 text-sm">Manage profiles, manual attendance, and leaves.</p>
+                </div>
+                <div class="flex flex-wrap gap-2 w-full xl:w-auto items-center">
+                    <select id="filter-user-dept" onchange="filterUsers()" class="flex-1 sm:flex-none px-3 py-2 text-sm border border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded focus:border-erp-primary transition-colors cursor-pointer">
+                        <option value="">All Departments</option>
+                        <option value="Engineering">Engineering</option><option value="Human Resources">Human Resources</option><option value="Sales">Sales</option><option value="Management">Management</option><option value="Operations">Operations</option>
+                    </select>
+                    <select id="filter-user-status" onchange="filterUsers()" class="flex-1 sm:flex-none px-3 py-2 text-sm border border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded focus:border-erp-primary transition-colors cursor-pointer">
+                        <option value="">All Statuses</option>
+                        <option value="Present">Present Today</option>
+                        <option value="Absent">Absent Today</option>
+                        <option value="Leave">On Leave</option>
+                    </select>
+                    <input type="text" id="search-user" placeholder="Search name or ID..." onkeyup="filterUsers()" class="flex-1 sm:flex-none px-3 py-2 text-sm border border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded focus:border-erp-primary min-w-[200px]">
+                    <button onclick="navTo('registration')" class="w-full sm:w-auto px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-sm font-bold shadow-sm whitespace-nowrap transition-colors">
+                        + Add Employee
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4" id="user-grid"></div>
+            <div id="no-users-msg" class="text-center py-10 text-slate-400 hidden">No employees match your search criteria.</div>
+        </section>
+
+
+        <!-- Reports View -->
+        <section id="view-reports" class="p-6 md:p-8 space-y-6 hidden animate-fade-in">
+             <div class="space-y-2 no-print">
+                <h2 class="text-2xl font-bold text-erp-dark dark:text-white flex items-center gap-2">Activity Reports <span>🔒</span></h2>
+                <p class="text-erp-secondary dark:text-slate-400 text-sm">Filter, export, print or query attendance data using AI.</p>
+            </div>
+
+            <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-4 flex flex-wrap gap-4 justify-between items-center no-print">
+                <div class="flex flex-wrap gap-2 items-center">
+                    <input type="date" id="filter-date" onchange="renderLogsTable()" class="px-3 py-1.5 text-sm border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded text-erp-secondary dark:text-slate-200">
+                    <select id="filter-dept" onchange="renderLogsTable()" class="px-3 py-1.5 text-sm border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded text-erp-secondary dark:text-slate-200">
+                        <option value="">All Departments</option><option>Engineering</option><option>Human Resources</option><option>Sales</option><option>Management</option><option>Operations</option>
+                    </select>
+                    <select id="filter-type" onchange="renderLogsTable()" class="px-3 py-1.5 text-sm border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded text-erp-secondary dark:text-slate-200">
+                        <option value="">All Activity</option><option value="Present">Present</option><option value="Departed">Departed</option><option value="Manual">Manual</option>
+                    </select>
+                    <button onclick="clearFilters()" class="text-xs text-blue-500 hover:underline">Clear</button>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="askAIToggle()" class="px-4 py-1.5 bg-indigo-50 dark:bg-indigo-900/50 border border-indigo-200 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 text-sm font-medium rounded hover:bg-indigo-100 dark:hover:bg-indigo-800 transition-colors flex items-center gap-2">
+                        ✨ Ask AI
+                    </button>
+                    <button onclick="printReport()" class="px-4 py-1.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-600 text-sm rounded shadow-sm hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors flex items-center gap-2">
+                        🖨️ Print PDF
+                    </button>
+                    <button onclick="exportToCSV()" class="px-4 py-1.5 bg-slate-800 dark:bg-slate-700 text-white text-sm rounded shadow-sm hover:bg-slate-700 dark:hover:bg-slate-600 transition-colors">
+                        Download CSV
+                    </button>
+                </div>
+            </div>
+
+            <div id="ai-query-box" class="hidden bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-800 rounded-xl p-5 relative shadow-sm no-print">
+                <div class="flex gap-2">
+                    <input type="text" id="ai-prompt" placeholder="Ask AI about the filtered data (e.g., 'Who arrived late?')" class="flex-1 px-3 py-2 text-sm border border-indigo-200 dark:border-indigo-700 dark:bg-slate-800 dark:text-white rounded focus:border-indigo-500">
+                    <button onclick="queryGeminiData()" class="px-4 py-2 bg-indigo-600 text-white rounded text-sm font-bold shadow-sm hover:bg-indigo-700">Ask</button>
+                </div>
+                <div id="ai-query-response" class="mt-3 text-sm text-indigo-900 dark:text-indigo-200 leading-relaxed hidden bg-white dark:bg-slate-800 p-3 rounded border border-indigo-100 dark:border-indigo-800"></div>
+            </div>
+
+            <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+                <div class="hidden print:block p-6 border-b border-slate-200 mb-4 text-center">
+                    <h1 class="text-3xl font-black uppercase tracking-wider mb-1">&#9745; FaceTrack ERP</h1>
+                    <h2 class="text-xl font-bold text-slate-600">Official Activity Report</h2>
+                    <p class="text-sm text-slate-500 mt-2" id="print-date"></p>
+                </div>
+                <div class="overflow-x-auto relative z-10">
+                    <table class="w-full text-sm text-left">
+                        <thead class="bg-slate-50 dark:bg-slate-900 text-erp-secondary dark:text-slate-400 font-semibold border-b border-slate-200 dark:border-slate-700">
+                            <tr>
+                                <th class="px-6 py-3">Date & Time</th>
+                                <th class="px-6 py-3">Employee</th>
+                                <th class="px-6 py-3">Status</th>
+                                <th class="px-6 py-3">Location/Note</th>
+                                <th class="px-6 py-3">Duration Logged</th>
+                                <th class="px-6 py-3 text-right no-print">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100 dark:divide-slate-700" id="logs-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECURITY MODALS -->
+        
+        <!-- App Exit Confirmation Modal -->
+        <div id="exit-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-sm overflow-hidden modal-animate border border-slate-200 dark:border-slate-700 p-6 text-center">
+                <div class="w-16 h-16 bg-rose-100 dark:bg-rose-900/30 text-rose-500 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">🚪</div>
+                <h3 class="font-bold text-lg text-erp-dark dark:text-white mb-2">Exit Application?</h3>
+                <p class="text-sm text-erp-secondary dark:text-slate-400 mb-6">Are you sure you want to close FaceTrack ERP?</p>
+                <div class="flex gap-3">
+                    <button onclick="cancelExit()" class="flex-1 py-2 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded font-bold hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">Cancel</button>
+                    <button onclick="confirmExit()" class="flex-1 py-2 bg-rose-500 hover:bg-rose-600 text-white rounded font-bold shadow-sm transition-colors">Yes, Exit</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Auth Modal -->
+        <div id="auth-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-sm overflow-hidden modal-animate border border-slate-200 dark:border-slate-700">
+                <div class="p-4 bg-slate-50 dark:bg-slate-900 border-b dark:border-slate-700 flex justify-between items-center">
+                    <h3 class="font-bold text-erp-dark dark:text-white flex items-center gap-2"><span>🔒</span> Security Clearance</h3>
+                    <button onclick="closeModals()" class="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">✕</button>
+                </div>
+                <div class="p-6 space-y-4">
+                    <p class="text-sm text-erp-secondary dark:text-slate-400">Admin access is required to control system data, view logs, or register faces.</p>
+                    <div>
+                        <input type="password" id="auth-password" placeholder="Enter Admin Password" class="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded focus:border-indigo-500 text-sm focus:outline-none" onkeyup="if(event.key === 'Enter') verifyPassword()">
+                        <p id="auth-error" class="text-xs text-rose-500 mt-1 hidden font-medium">Incorrect password. Access denied.</p>
+                    </div>
+                    <button onclick="verifyPassword()" class="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-sm font-bold mt-2 shadow-sm transition-colors">Authenticate</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Admin Control Panel Modal -->
+        <div id="admin-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden modal-animate border border-slate-200 dark:border-slate-700">
+                <div class="p-4 bg-erp-dark border-b border-erp-dark flex justify-between items-center">
+                    <h3 class="font-bold text-white flex items-center gap-2"><span>🛡️</span> Admin Control Panel</h3>
+                    <button onclick="closeModals()" class="text-slate-400 hover:text-white transition-colors">✕</button>
+                </div>
+                <div class="p-6 space-y-6">
+                    <div>
+                        <h4 class="text-xs font-bold text-erp-secondary dark:text-slate-400 uppercase tracking-wider mb-2">Quick Actions</h4>
+                        <div class="grid grid-cols-3 gap-3">
+                            <button onclick="lockSession()" class="p-3 border border-slate-200 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors flex flex-col items-center justify-center gap-1 text-erp-dark dark:text-white text-center">
+                                <span class="text-xl">🔒</span><span class="text-[10px] sm:text-xs font-bold">Lock Session</span>
+                            </button>
+                            <button onclick="exportBackup()" class="p-3 border border-slate-200 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors flex flex-col items-center justify-center gap-1 text-erp-dark dark:text-white text-center">
+                                <span class="text-xl">💾</span><span class="text-[10px] sm:text-xs font-bold">Export</span>
+                            </button>
+                            <input type="file" id="import-backup-file" accept=".json" class="hidden" onchange="handleImportBackup(event)">
+                            <button onclick="document.getElementById('import-backup-file').click()" class="p-3 border border-slate-200 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors flex flex-col items-center justify-center gap-1 text-erp-dark dark:text-white text-center">
+                                <span class="text-xl">📂</span><span class="text-[10px] sm:text-xs font-bold">Import</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="pt-4 border-t border-slate-100 dark:border-slate-700">
+                        <h4 class="text-xs font-bold text-erp-secondary dark:text-slate-400 uppercase tracking-wider mb-2">Security</h4>
+                        <div class="space-y-2">
+                            <input type="password" id="old-pwd" placeholder="Current Password" class="w-full px-3 py-1.5 border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded text-sm focus:border-indigo-500">
+                            <input type="password" id="new-pwd" placeholder="New Password" class="w-full px-3 py-1.5 border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded text-sm focus:border-indigo-500">
+                            <button onclick="changeAdminPassword()" class="w-full py-1.5 bg-indigo-50 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700 hover:bg-indigo-100 dark:hover:bg-indigo-800 rounded text-xs font-bold transition-colors">Update Password</button>
+                        </div>
+                    </div>
+                    <div class="pt-4 border-t border-slate-100 dark:border-slate-700">
+                        <h4 class="text-xs font-bold text-rose-500 uppercase tracking-wider mb-2">Danger Zone</h4>
+                        <button onclick="clearData()" class="w-full py-2 bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800 hover:bg-rose-100 dark:hover:bg-rose-900 rounded text-sm font-bold transition-colors flex items-center justify-center gap-2">
+                            <span>⚠️</span> Factory Reset (Wipe Database)
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Modal -->
+        <div id="settings-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 z-[60]">
+            <div class="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-sm overflow-hidden modal-animate border border-slate-200 dark:border-slate-700 max-h-[90vh] flex flex-col">
+                <div class="p-4 bg-slate-50 dark:bg-slate-900 border-b dark:border-slate-700 flex justify-between items-center shrink-0">
+                    <h3 class="font-bold text-erp-dark dark:text-white">⚙️ System Settings</h3>
+                    <button onclick="closeModals()" class="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">✕</button>
+                </div>
+                <div class="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+                    <div>
+                        <label class="block text-xs font-semibold text-erp-secondary dark:text-slate-400 mb-1">Match Strictness Threshold (<span id="set-thresh-val">0.55</span>)</label>
+                        <input type="range" id="set-thresh" min="0.4" max="0.7" step="0.01" class="w-full accent-erp-primary" oninput="document.getElementById('set-thresh-val').innerText = this.value">
+                        <p class="text-[10px] text-slate-400 dark:text-slate-500 mt-1">Lower = Stricter Match. Higher = May cause false positives.</p>
+                    </div>
+
+                    <div class="pt-4 border-t border-slate-100 dark:border-slate-700">
+                        <label class="block text-xs font-bold text-indigo-700 dark:text-indigo-400 mb-1">✨ Google Gemini API Key</label>
+                        <input type="password" id="set-api-key" placeholder="Paste your new API key here..." class="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded focus:border-indigo-500 text-sm font-mono">
+                        <p class="text-[10px] text-rose-500 font-bold mt-1">Warning: If Google revoked your key, generate a new one.</p>
+                        <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-[10px] text-blue-500 dark:text-blue-400 hover:underline">Get a free Google API key here</a>
+                    </div>
+                    
+                    <div class="pt-2">
+                        <label class="block text-xs font-bold text-indigo-700 dark:text-indigo-400 mb-1">🤖 AI Model Name</label>
+                        <input type="text" id="set-ai-model" placeholder="e.g. gemini-2.5-flash" class="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded focus:border-indigo-500 text-sm font-mono">
+                        <p class="text-[10px] text-slate-400 dark:text-slate-500 mt-1">Default is gemini-2.5-flash.</p>
+                    </div>
+
+                    <!-- Shift Management -->
+                    <div class="pt-4 border-t border-slate-100 dark:border-slate-700">
+                        <label class="block text-xs font-bold text-erp-secondary dark:text-slate-400 mb-1">Standard Shift Start Time</label>
+                        <input type="time" id="set-shift-start" class="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded focus:border-erp-primary text-sm">
+                        <p class="text-[10px] text-slate-400 dark:text-slate-500 mt-1">Used to flag 'Late Arrivals' directly on logs.</p>
+                    </div>
+
+                    <!-- Geolocation Settings -->
+                    <div class="pt-4 border-t border-slate-100 dark:border-slate-700 space-y-3">
+                        <div class="flex justify-between items-center">
+                            <label class="text-xs font-bold text-erp-secondary dark:text-slate-400">Enforce GPS Geofencing</label>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                              <input type="checkbox" id="set-geofence" class="sr-only peer" onchange="toggleGeofenceOptions(this.checked)">
+                              <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-slate-600 peer-checked:bg-emerald-500"></div>
+                            </label>
+                        </div>
+                        <p class="text-[10px] text-slate-400 dark:text-slate-500 leading-tight">If enabled, restricts attendance to a specific location radius.</p>
+                        
+                        <div id="geo-options" class="space-y-2 hidden bg-slate-100 dark:bg-slate-800 p-3 rounded border border-slate-200 dark:border-slate-600">
+                            <!-- Interactive Map Container -->
+                            <div id="settings-map" class="h-48 w-full rounded border border-slate-300 dark:border-slate-600 z-10 relative mb-3"></div>
+                            
+                            <button type="button" onclick="useCurrentLocation(this)" class="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-bold shadow-sm transition-all mb-2 flex items-center justify-center gap-2">
+                                <span>📍</span> Get Current Location
+                            </button>
+                            
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="block text-[10px] font-bold text-erp-secondary dark:text-slate-400 mb-1">Target Latitude</label>
+                                    <input type="number" id="set-geo-lat" step="0.000001" placeholder="e.g. 28.6692" class="w-full px-2 py-1.5 border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded text-xs font-mono" oninput="updateMapMarkerFromInputs()">
+                                </div>
+                                <div>
+                                    <label class="block text-[10px] font-bold text-erp-secondary dark:text-slate-400 mb-1">Target Longitude</label>
+                                    <input type="number" id="set-geo-lng" step="0.000001" placeholder="e.g. 77.4538" class="w-full px-2 py-1.5 border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded text-xs font-mono" oninput="updateMapMarkerFromInputs()">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-bold text-erp-secondary dark:text-slate-400 mb-1">Allowed Radius (Meters)</label>
+                                <input type="number" id="set-geo-rad" placeholder="e.g. 50" class="w-full px-2 py-1.5 border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded text-xs">
+                            </div>
+                        </div>
+                    </div>
+
+                    <button onclick="saveSettings()" class="w-full py-2 bg-erp-dark dark:bg-slate-700 text-white rounded text-sm font-bold mt-2 hover:bg-slate-800 dark:hover:bg-slate-600">Save Config</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Edit User Modal -->
+        <div id="edit-user-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-sm overflow-hidden modal-animate border border-slate-200 dark:border-slate-700">
+                <div class="p-4 bg-slate-50 dark:bg-slate-900 border-b dark:border-slate-700 flex justify-between items-center">
+                    <h3 class="font-bold text-erp-dark dark:text-white">Edit Employee Profile</h3>
+                    <button onclick="closeModals()" class="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">✕</button>
+                </div>
+                <div class="p-6 space-y-3">
+                    <input type="hidden" id="edit-id">
+                    <div>
+                        <label class="block text-xs font-semibold text-erp-secondary dark:text-slate-400 mb-1">Employee ID</label>
+                        <input type="text" id="edit-emp-id" class="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded focus:border-erp-primary text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-erp-secondary dark:text-slate-400 mb-1">Name</label>
+                        <input type="text" id="edit-name" class="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded focus:border-erp-primary text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-erp-secondary dark:text-slate-400 mb-1">Job Title / Role</label>
+                        <input type="text" id="edit-role" class="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded focus:border-erp-primary text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-erp-secondary dark:text-slate-400 mb-1">Department</label>
+                        <select id="edit-dept" class="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded focus:border-erp-primary text-sm">
+                            <option>Engineering</option><option>Human Resources</option><option>Sales</option><option>Management</option><option>Operations</option>
+                        </select>
+                    </div>
+                    <button onclick="saveUserEdit()" class="w-full py-2 bg-erp-primary text-white rounded text-sm font-bold hover:bg-blue-600 mt-2">Update Profile</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- NEW: Manual Punch Modal -->
+        <div id="manual-punch-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-sm overflow-hidden modal-animate border border-slate-200 dark:border-slate-700">
+                <div class="p-4 bg-slate-50 dark:bg-slate-900 border-b dark:border-slate-700 flex justify-between items-center">
+                    <h3 class="font-bold text-erp-dark dark:text-white">⏱️ Manual Time Punch</h3>
+                    <button onclick="closeModals()" class="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">✕</button>
+                </div>
+                <div class="p-6 space-y-4">
+                    <input type="hidden" id="punch-id">
+                    <p class="text-xs text-slate-500 mb-2">Manually log a clock-in or clock-out for <strong id="punch-name-display"></strong>.</p>
+                    
+                    <div>
+                        <label class="block text-xs font-semibold text-erp-secondary dark:text-slate-400 mb-1">Status Action</label>
+                        <select id="punch-type" class="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded focus:border-erp-primary text-sm">
+                            <option value="Present">Present (Clock In)</option>
+                            <option value="Departed">Departed (Clock Out)</option>
+                        </select>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-semibold text-erp-secondary dark:text-slate-400 mb-1">Date</label>
+                            <input type="date" id="punch-date" class="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded focus:border-erp-primary text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-erp-secondary dark:text-slate-400 mb-1">Time</label>
+                            <input type="time" id="punch-time" class="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded focus:border-erp-primary text-sm">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-erp-secondary dark:text-slate-400 mb-1">Note (Optional)</label>
+                        <input type="text" id="punch-note" placeholder="e.g. Forgot to scan" class="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded focus:border-erp-primary text-sm">
+                    </div>
+                    <button onclick="saveManualPunch()" class="w-full py-2 bg-emerald-600 text-white rounded text-sm font-bold hover:bg-emerald-500 mt-2 shadow-sm">Save Record</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- NEW: Leave Management Modal -->
+        <div id="leave-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-sm overflow-hidden modal-animate border border-slate-200 dark:border-slate-700">
+                <div class="p-4 bg-slate-50 dark:bg-slate-900 border-b dark:border-slate-700 flex justify-between items-center">
+                    <h3 class="font-bold text-erp-dark dark:text-white">🏖️ Manage Leave</h3>
+                    <button onclick="closeModals()" class="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">✕</button>
+                </div>
+                <div class="p-6 space-y-4">
+                    <input type="hidden" id="leave-id">
+                    <p class="text-xs text-slate-500 mb-2">Mark <strong id="leave-name-display"></strong> as 'On Leave'. They will not be counted as 'Absent' in the dashboard.</p>
+                    
+                    <div>
+                        <label class="block text-xs font-semibold text-erp-secondary dark:text-slate-400 mb-1">On Leave Until (Inclusive)</label>
+                        <input type="date" id="leave-date" class="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded focus:border-erp-primary text-sm">
+                    </div>
+                    
+                    <div class="flex gap-2 pt-2">
+                        <button onclick="clearLeave()" class="flex-1 py-2 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded text-sm font-bold hover:bg-slate-300 dark:hover:bg-slate-600 transition">Cancel Leave</button>
+                        <button onclick="saveLeave()" class="flex-1 py-2 bg-purple-600 text-white rounded text-sm font-bold hover:bg-purple-500 shadow-sm transition">Set Leave</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        // --- CONFIG & STATE ---
+        const apiKey = ""; 
+        const defaultUserKey = "AIzaSyCZoqOR1IP4SHpnT7QXqWmPmP9F6fIzuZQ"; 
+        const defaultAiModel = "gemini-2.5-flash"; 
+        
+        const STORAGE_KEY = 'facetrack_erp_v30';
+        
+        let state = {
+            users: [], 
+            logs: [],  
+            settings: { 
+                matchThreshold: 0.55, 
+                adminPassword: '3214@sharma', 
+                geminiKey: defaultUserKey, 
+                aiModel: defaultAiModel,
+                shiftStart: '09:00',
+                geofenceEnabled: true,
+                targetLat: 28.6692,
+                targetLng: 77.4538,
+                geofenceRadius: 50
+            }
+        };
+
+        let activeFilteredLogs = []; 
+        let isAdminUnlocked = false;
+        let pendingAdminAction = null;
+        let deptChartInst, trendChartInst;
+        let currentView = 'dashboard';
+        
+        let settingsMap = null;
+        let settingsMarker = null;
+
+        function initApp() {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) {
+                try {
+                    const parsed = JSON.parse(saved);
+                    state.users = parsed.users || [];
+                    state.logs = parsed.logs || [];
+                    state.settings = { ...state.settings, ...parsed.settings };
+                    
+                    if (parsed.settings && parsed.settings.geofenceEnabled === undefined) {
+                        state.settings.geofenceEnabled = true;
+                    }
+                } catch(e) { console.error("Corrupted local storage"); }
+            }
+            
+            try {
+                history.replaceState({ view: 'exit' }, '', window.location.pathname);
+                history.pushState({ view: 'dashboard' }, '', '#dashboard');
+                
+                window.addEventListener('popstate', (e) => {
+                    if (isAnyModalOpen()) {
+                        closeModals();
+                        history.pushState({ view: currentView }, '', '#' + currentView);
+                        return;
+                    }
+
+                    const view = e.state ? e.state.view : null;
+                    
+                    if (view === 'exit' || !view) {
+                        const exitModal = document.getElementById('exit-modal');
+                        if (exitModal) exitModal.classList.remove('hidden');
+                        history.pushState({ view: 'dashboard' }, '', '#dashboard');
+                        showView('dashboard');
+                    } else {
+                        showView(view);
+                    }
+                });
+            } catch (e) {
+                console.warn("History API restricted (likely due to iframe/blob origin). Back button navigation disabled.", e);
+            }
+
+            updateThemeUI(document.documentElement.classList.contains('dark') ? 'dark' : 'light');
+            showView('dashboard'); 
+            initFaceAPI();
+            updateAdminUI();
+            startLiveClock();
+        }
+
+        // --- BACK BUTTON MODAL LOGIC ---
+        function isAnyModalOpen() {
+            const modals = ['auth-modal', 'admin-modal', 'settings-modal', 'edit-user-modal', 'exit-modal', 'manual-punch-modal', 'leave-modal', 'dash-ai-query-box'];
+            return modals.some(id => {
+                const el = document.getElementById(id);
+                return el && !el.classList.contains('hidden');
+            });
+        }
+
+        function confirmExit() {
+            try { window.close(); } catch(e) {}
+            setTimeout(() => {
+                document.body.innerHTML = `
+                    <div class="h-screen w-screen flex flex-col items-center justify-center bg-slate-900 text-white p-6 text-center">
+                        <div class="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center text-4xl mb-4 shadow-lg">👋</div>
+                        <h2 class="text-2xl font-bold mb-2">Application Closed</h2>
+                        <p class="text-slate-400 text-sm">You have safely exited FaceTrack ERP.</p>
+                        <p class="text-slate-500 text-xs mt-8">You may now close this browser tab.</p>
+                    </div>
+                `;
+            }, 100);
+        }
+
+        function cancelExit() {
+            const exitModal = document.getElementById('exit-modal');
+            if(exitModal) exitModal.classList.add('hidden');
+        }
+
+        // --- LIVE CLOCK ---
+        function startLiveClock() {
+            setInterval(() => {
+                const clock = document.getElementById('live-clock');
+                if(clock) clock.innerText = new Date().toLocaleTimeString('en-US', { hour12: false });
+                
+                const printDate = document.getElementById('print-date');
+                if(printDate) printDate.innerText = "Generated on: " + new Date().toLocaleString();
+            }, 1000);
+        }
+
+        function saveData() {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+            updateDashboardData();
+            renderUserGrid();
+            renderLogsTable();
+        }
+
+        // --- THEME LOGIC ---
+        function toggleTheme() {
+            const html = document.documentElement;
+            if (html.classList.contains('dark')) {
+                html.classList.remove('dark');
+                localStorage.setItem('theme', 'light');
+                updateThemeUI('light');
+            } else {
+                html.classList.add('dark');
+                localStorage.setItem('theme', 'dark');
+                updateThemeUI('dark');
+            }
+            if (deptChartInst) updateDashboardData();
+        }
+
+        function updateThemeUI(theme) {
+            const isDark = theme === 'dark';
+            const icon = document.getElementById('theme-icon');
+            if (icon) icon.innerText = isDark ? '☀️' : '🌙';
+            const text = document.getElementById('theme-text');
+            if (text) text.innerText = isDark ? 'Light Mode' : 'Dark Mode';
+            const mobileIcon = document.getElementById('mobile-theme-icon');
+            if(mobileIcon) mobileIcon.innerText = isDark ? '☀️' : '🌙';
+            const mobileText = document.getElementById('mobile-theme-text');
+            if(mobileText) mobileText.innerText = isDark ? 'Light Mode' : 'Dark Mode';
+        }
+
+        // --- PRINT PDF LOGIC ---
+        function printReport() {
+            const html = document.documentElement;
+            const isDark = html.classList.contains('dark');
+            
+            if (isDark) html.classList.remove('dark');
+            
+            setTimeout(() => {
+                window.print();
+                if (isDark) html.classList.add('dark');
+            }, 100);
+        }
+
+        // --- SECURITY LOGIC ---
+        function requireAdmin(actionFn) {
+            if (isAdminUnlocked) {
+                if (actionFn) actionFn();
+            } else {
+                pendingAdminAction = actionFn;
+                const pwInput = document.getElementById('auth-password');
+                if(pwInput) pwInput.value = '';
+                const errText = document.getElementById('auth-error');
+                if(errText) errText.classList.add('hidden');
+                const modal = document.getElementById('auth-modal');
+                if(modal) modal.classList.remove('hidden');
+                if(pwInput) setTimeout(() => pwInput.focus(), 100);
+            }
+        }
+
+        function verifyPassword() {
+            const pwdInput = document.getElementById('auth-password');
+            if(!pwdInput) return;
+            const errorMsg = document.getElementById('auth-error');
+            
+            if (pwdInput.value === state.settings.adminPassword) {
+                isAdminUnlocked = true;
+                if(errorMsg) errorMsg.classList.add('hidden');
+                const modal = document.getElementById('auth-modal');
+                if(modal) modal.classList.add('hidden');
+                showToast("Admin Access Granted", "success");
+                
+                updateAdminUI();
+                
+                if (pendingAdminAction) {
+                    pendingAdminAction();
+                    pendingAdminAction = null;
+                }
+            } else {
+                if(errorMsg) errorMsg.classList.remove('hidden');
+            }
+        }
+
+        function updateAdminUI() {
+            const adminStatusText = document.getElementById('admin-status-text');
+            if (isAdminUnlocked) {
+                if (adminStatusText) {
+                    adminStatusText.innerText = "Unlocked";
+                    adminStatusText.className = "text-[10px] text-emerald-500 font-bold";
+                }
+            } else {
+                if (adminStatusText) {
+                    adminStatusText.innerText = "Locked";
+                    adminStatusText.className = "text-[10px] text-rose-500 font-bold";
+                }
+            }
+        }
+
+        function openAdminPanel() { 
+            const modal = document.getElementById('admin-modal');
+            if(modal) modal.classList.remove('hidden'); 
+        }
+
+        function lockSession() {
+            isAdminUnlocked = false;
+            closeModals();
+            updateAdminUI();
+            navTo('dashboard'); 
+            showToast("Session Locked. Admin access revoked.", "blue");
+        }
+
+        function clearData() {
+            if(confirm("WIPE ENTIRE DATABASE? This deletes all faces and logs and cannot be undone.")) {
+                localStorage.removeItem(STORAGE_KEY);
+                state = { users: [], logs: [], settings: { matchThreshold: 0.55, adminPassword: '3214@sharma', geminiKey: defaultUserKey, aiModel: defaultAiModel, shiftStart: '09:00', geofenceEnabled: true, targetLat: 28.6692, targetLng: 77.4538, geofenceRadius: 50 } };
+                saveData();
+                showToast("Database wiped.", "error");
+                lockSession();
+            }
+        }
+
+        function exportBackup() {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state));
+            const dlAnchorElem = document.createElement('a');
+            dlAnchorElem.setAttribute("href", dataStr);
+            dlAnchorElem.setAttribute("download", `facetrack_database_backup_${Date.now()}.json`);
+            dlAnchorElem.click();
+            showToast("Database Backup Downloaded", "success");
+        }
+
+        function handleImportBackup(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const importedState = JSON.parse(e.target.result);
+                    if (importedState && typeof importedState === 'object') {
+                        if(confirm("WARNING: Importing a backup will overwrite your current database completely. Do you want to proceed?")) {
+                            state.users = importedState.users || [];
+                            state.logs = importedState.logs || [];
+                            state.settings = { ...state.settings, ...(importedState.settings || {}) };
+                            
+                            saveData();
+                            closeModals();
+                            showToast("Backup imported successfully!", "success");
+                        }
+                    } else {
+                        showToast("Invalid backup file format.", "error");
+                    }
+                } catch (err) {
+                    showToast("Error reading backup file. Must be a valid JSON.", "error");
+                }
+                event.target.value = '';
+            };
+            reader.readAsText(file);
+        }
+
+        function changeAdminPassword() {
+            const oldP = document.getElementById('old-pwd');
+            const newP = document.getElementById('new-pwd');
+            if(!oldP || !newP) return;
+            
+            if (oldP.value !== state.settings.adminPassword) return showToast("Incorrect Current Password.", "error");
+            if (newP.value.length < 4) return showToast("New password must be at least 4 characters.", "error");
+            
+            state.settings.adminPassword = newP.value;
+            saveData();
+            oldP.value = '';
+            newP.value = '';
+            showToast("Admin Password Updated Successfully!", "success");
+        }
+
+        // --- TOAST NOTIFICATIONS ---
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            if(!container) return;
+            const toast = document.createElement('div');
+            const bgClass = type === 'success' ? 'bg-emerald-600' : (type === 'error' ? 'bg-rose-600' : 'bg-blue-600');
+            toast.className = `px-4 py-3 rounded shadow-lg text-white text-sm font-medium ${bgClass} toast-animate pointer-events-auto flex items-center gap-2`;
+            toast.innerHTML = type === 'success' ? `<span>✅</span> ${message}` : `<span>⚠️</span> ${message}`;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0'; toast.style.transform = 'translateX(100%)'; toast.style.transition = 'all 0.3s ease';
+                setTimeout(() => toast.remove(), 300);
+            }, 3500);
+        }
+
+        // --- FACE-API.JS LOAD ---
+        const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
+        let modelsLoaded = false;
+
+        async function initFaceAPI() {
+            try {
+                await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+                await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+                await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+                modelsLoaded = true;
+                const loader = document.getElementById('app-loader');
+                if(loader) {
+                    loader.style.opacity = '0';
+                    setTimeout(() => loader.style.display = 'none', 500);
+                }
+                
+                const termBtn = document.getElementById('btn-term-camera-power');
+                if(termBtn) termBtn.disabled = false;
+                const regBtn = document.getElementById('btn-reg-camera-power');
+                if(regBtn) regBtn.disabled = false;
+            } catch (err) {
+                const loadText = document.getElementById('loader-text');
+                if(loadText) loadText.innerHTML = "<span class='text-red-500'>Error loading AI models. Ensure you are connected to the internet.</span>";
+            }
+        }
+
+        // --- SEPARATED CAMERA LOGIC ---
+        let isTermActive = false, termStream = null;
+        let isRegActive = false, regStream = null;
+        let livenessTimer = null;
+        let livenessVerified = false;
+        let blinkFrames = 0;
+
+        function calculateEAR(eye) {
+            const v1 = Math.hypot(eye[1].x - eye[5].x, eye[1].y - eye[5].y);
+            const v2 = Math.hypot(eye[2].x - eye[4].x, eye[2].y - eye[4].y);
+            const h = Math.hypot(eye[0].x - eye[3].x, eye[0].y - eye[3].y);
+            return (v1 + v2) / (2.0 * h);
+        }
+
+        async function runLivenessDetection() {
+            if (!isTermActive || livenessVerified) return;
+
+            const videoEl = document.getElementById('term-webcam');
+            const canvasEl = document.getElementById('term-canvas');
+            if(!videoEl || !canvasEl) return;
+
+            if (videoEl.paused || videoEl.ended) {
+                livenessTimer = setTimeout(runLivenessDetection, 100);
+                return;
+            }
+
+            try {
+                const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 });
+                const detection = await faceapi.detectSingleFace(videoEl, options).withFaceLandmarks();
+
+                canvasEl.getContext('2d').clearRect(0, 0, canvasEl.width, canvasEl.height);
+
+                if (detection) {
+                    const resized = faceapi.resizeResults(detection, { width: videoEl.videoWidth, height: videoEl.videoHeight });
+                    faceapi.draw.drawDetections(canvasEl, resized);
+                    
+                    const ctx = canvasEl.getContext('2d');
+                    ctx.fillStyle = "#fbbf24";
+                    ctx.font = "bold 14px sans-serif";
+                    ctx.fillText("⚠️ BLINK TO UNLOCK", resized.detection.box.x, resized.detection.box.y - 10);
+
+                    const leftEye = detection.landmarks.getLeftEye();
+                    const rightEye = detection.landmarks.getRightEye();
+                    
+                    const earL = calculateEAR(leftEye);
+                    const earR = calculateEAR(rightEye);
+                    const avgEAR = (earL + earR) / 2;
+
+                    if (avgEAR < 0.26) {
+                        blinkFrames++;
+                    } else {
+                        if (blinkFrames > 0 && blinkFrames < 15) {
+                            livenessVerified = true;
+                            const liveStat = document.getElementById('term-liveness-status');
+                            if(liveStat) {
+                                liveStat.innerText = "VERIFIED ✅";
+                                liveStat.className = "text-emerald-400 font-bold";
+                            }
+                            
+                            const btn = document.getElementById('btn-mark-attendance');
+                            if(btn) {
+                                btn.disabled = false;
+                                btn.innerText = "MARK ATTENDANCE";
+                            }
+                            
+                            canvasEl.getContext('2d').clearRect(0, 0, canvasEl.width, canvasEl.height);
+                            ctx.strokeStyle = "#10b981";
+                            ctx.lineWidth = 4;
+                            ctx.strokeRect(resized.detection.box.x, resized.detection.box.y, resized.detection.box.width, resized.detection.box.height);
+                            ctx.fillStyle = "#10b981";
+                            ctx.fillText("✅ LIVENESS VERIFIED", resized.detection.box.x, resized.detection.box.y - 10);
+                            
+                            setTimeout(() => canvasEl.getContext('2d').clearRect(0, 0, canvasEl.width, canvasEl.height), 2000);
+                            return; 
+                        }
+                        blinkFrames = 0; 
+                    }
+                }
+            } catch (e) { console.error("Liveness tracking active."); }
+
+            livenessTimer = setTimeout(runLivenessDetection, 100);
+        }
+
+        async function toggleTermCamera() {
+            if (!modelsLoaded) return showToast("Models loading...", "error");
+            if (isTermActive) stopTermCamera(); else startTermCamera();
+        }
+
+        async function startTermCamera() {
+            if (isRegActive) stopRegCamera(); 
+            const videoEl = document.getElementById('term-webcam');
+            const canvasEl = document.getElementById('term-canvas');
+            
+            if (!window.isSecureContext) return showToast("Camera requires HTTPS.", "error");
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return showToast("Camera API blocked.", "error");
+
+            try {
+                termStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 } });
+                if(videoEl) videoEl.srcObject = termStream;
+                isTermActive = true;
+                
+                const statEl = document.getElementById('term-cam-status');
+                if(statEl) {
+                    statEl.innerText = "ONLINE";
+                    statEl.className = "text-emerald-400 font-bold";
+                }
+                const liveEl = document.getElementById('term-liveness-status');
+                if(liveEl) {
+                    liveEl.innerText = "WAITING FOR BLINK...";
+                    liveEl.className = "text-amber-400 font-bold animate-pulse";
+                }
+                const gpsStat = document.getElementById('term-gps-status');
+                if(gpsStat) {
+                    gpsStat.innerText = state.settings.geofenceEnabled ? "WAITING..." : "DISABLED";
+                    gpsStat.className = "text-slate-500 font-bold";
+                }
+                
+                const btn = document.getElementById('btn-term-camera-power');
+                if(btn) {
+                    btn.innerHTML = "TURN OFF CAMERA"; 
+                    btn.classList.replace('bg-slate-700', 'bg-rose-600');
+                    btn.classList.replace('hover:bg-slate-600', 'hover:bg-rose-500');
+                }
+                
+                const attBtn = document.getElementById('btn-mark-attendance');
+                if(attBtn) {
+                    attBtn.disabled = true;
+                    attBtn.innerText = "BLINK TO UNLOCK";
+                }
+
+                livenessVerified = false;
+                blinkFrames = 0;
+
+                if(videoEl && canvasEl) {
+                    videoEl.onloadedmetadata = () => {
+                        canvasEl.width = videoEl.videoWidth; 
+                        canvasEl.height = videoEl.videoHeight;
+                        faceapi.matchDimensions(canvasEl, videoEl);
+                        runLivenessDetection();
+                    };
+                }
+            } catch (e) { showToast("Camera access failed.", "error"); }
+        }
+
+        function stopTermCamera() {
+            clearTimeout(livenessTimer);
+            if (termStream) termStream.getTracks().forEach(t => t.stop());
+            termStream = null; 
+            const videoEl = document.getElementById('term-webcam');
+            if(videoEl) videoEl.srcObject = null; 
+            isTermActive = false;
+            
+            const statEl = document.getElementById('term-cam-status');
+            if(statEl) {
+                statEl.innerText = "OFFLINE";
+                statEl.className = "text-slate-500";
+            }
+            const liveEl = document.getElementById('term-liveness-status');
+            if(liveEl) {
+                liveEl.innerText = "OFF";
+                liveEl.className = "text-slate-500 font-bold";
+            }
+            const gpsStat = document.getElementById('term-gps-status');
+            if(gpsStat) {
+                gpsStat.innerText = "WAITING";
+                gpsStat.className = "text-slate-500 font-bold";
+            }
+            
+            const btn = document.getElementById('btn-term-camera-power');
+            if(btn) {
+                btn.innerHTML = "TURN ON CAMERA"; 
+                btn.classList.replace('bg-rose-600', 'bg-slate-700');
+                btn.classList.replace('hover:bg-rose-500', 'hover:bg-slate-600');
+            }
+            
+            const attBtn = document.getElementById('btn-mark-attendance');
+            if(attBtn) {
+                attBtn.disabled = true;
+                attBtn.innerText = "MARK ATTENDANCE";
+            }
+
+            const canvasEl = document.getElementById('term-canvas');
+            if(canvasEl) canvasEl.getContext('2d').clearRect(0, 0, canvasEl.width, canvasEl.height);
+        }
+
+        async function toggleRegCamera() {
+            if (!modelsLoaded) return showToast("Models loading...", "error");
+            if (isRegActive) stopRegCamera(); else startRegCamera();
+        }
+
+        async function startRegCamera() {
+            if (isTermActive) stopTermCamera(); 
+            const videoEl = document.getElementById('reg-webcam');
+            const canvasEl = document.getElementById('reg-canvas');
+
+            if (!window.isSecureContext) return showToast("Camera requires HTTPS.", "error");
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return showToast("Camera API blocked.", "error");
+
+            try {
+                regStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 } });
+                if(videoEl) videoEl.srcObject = regStream;
+                isRegActive = true;
+                
+                const statEl = document.getElementById('reg-cam-status');
+                if(statEl) {
+                    statEl.innerText = "ONLINE";
+                    statEl.className = "text-emerald-400 font-bold";
+                }
+                
+                const btn = document.getElementById('btn-reg-camera-power');
+                if(btn) {
+                    btn.innerHTML = "STOP CAMERA"; 
+                    btn.classList.replace('bg-slate-700', 'bg-rose-600');
+                    btn.classList.replace('hover:bg-slate-600', 'hover:bg-rose-500');
+                }
+                
+                const regBtn = document.getElementById('btn-register');
+                if(regBtn) regBtn.disabled = false;
+
+                if(videoEl && canvasEl) {
+                    videoEl.onloadedmetadata = () => {
+                        canvasEl.width = videoEl.videoWidth; 
+                        canvasEl.height = videoEl.videoHeight;
+                        faceapi.matchDimensions(canvasEl, videoEl);
+                    };
+                }
+            } catch (e) { showToast("Camera access failed.", "error"); }
+        }
+
+        function stopRegCamera() {
+            if (regStream) regStream.getTracks().forEach(t => t.stop());
+            regStream = null; 
+            const videoEl = document.getElementById('reg-webcam');
+            if(videoEl) videoEl.srcObject = null; 
+            isRegActive = false;
+            
+            const statEl = document.getElementById('reg-cam-status');
+            if(statEl) {
+                statEl.innerText = "OFF";
+                statEl.className = "text-slate-500";
+            }
+            
+            const btn = document.getElementById('btn-reg-camera-power');
+            if(btn) {
+                btn.innerHTML = "START CAMERA"; 
+                btn.classList.replace('bg-rose-600', 'bg-slate-700');
+                btn.classList.replace('hover:bg-rose-500', 'hover:bg-slate-600');
+            }
+            
+            const regBtn = document.getElementById('btn-register');
+            if(regBtn) regBtn.disabled = true;
+
+            const canvasEl = document.getElementById('reg-canvas');
+            if(canvasEl) canvasEl.getContext('2d').clearRect(0, 0, canvasEl.width, canvasEl.height);
+        }
+
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371e3; 
+            const p1 = lat1 * Math.PI/180;
+            const p2 = lat2 * Math.PI/180;
+            const dp = (lat2-lat1) * Math.PI/180;
+            const dl = (lon2-lon1) * Math.PI/180;
+            const a = Math.sin(dp/2) * Math.sin(dp/2) + Math.cos(p1) * Math.cos(p2) * Math.sin(dl/2) * Math.sin(dl/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+
+        // Check if a given date string makes the log "late"
+        function checkIfLate(dateObj) {
+            const shiftParts = (state.settings.shiftStart || '09:00').split(':');
+            const shiftMins = parseInt(shiftParts[0]) * 60 + parseInt(shiftParts[1]);
+            const currentMins = dateObj.getHours() * 60 + dateObj.getMinutes();
+            return currentMins > shiftMins;
+        }
+
+        async function markAttendance() {
+            const videoEl = document.getElementById('term-webcam');
+            const canvasEl = document.getElementById('term-canvas');
+            const btn = document.getElementById('btn-mark-attendance');
+            const gpsStat = document.getElementById('term-gps-status');
+
+            if (!isTermActive || !videoEl || videoEl.paused) return showToast("Turn on the camera first.", "error");
+            if (state.users.length === 0) return showToast("No users registered in system.", "error");
+
+            let locationData = null;
+            let distanceToTarget = null;
+
+            if (state.settings.geofenceEnabled) {
+                
+                if(gpsStat) {
+                    gpsStat.innerText = "LOCATING...";
+                    gpsStat.className = "text-amber-400 font-bold animate-pulse";
+                }
+
+                if (navigator.permissions) {
+                    try {
+                        const perm = await navigator.permissions.query({ name: 'geolocation' });
+                        if (perm.state === 'denied') {
+                            if(btn) { btn.innerText = "MARK ATTENDANCE"; btn.disabled = false; }
+                            if (isTermActive) { livenessVerified = false; blinkFrames = 0; runLivenessDetection(); }
+                            if(gpsStat) { gpsStat.innerText = "DENIED ❌"; gpsStat.className = "text-rose-500 font-bold"; }
+                            return showToast("Location access is blocked! Please enable GPS in your browser settings to mark attendance.", "error");
+                        }
+                    } catch (e) {}
+                }
+
+                if(btn) {
+                    btn.innerText = "VERIFYING GPS..."; 
+                    btn.disabled = true;
+                }
+
+                try {
+                    locationData = await new Promise((resolve, reject) => {
+                        navigator.geolocation.getCurrentPosition(
+                            pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+                            err => reject(err),
+                            { enableHighAccuracy: true, timeout: 5000 }
+                        );
+                    });
+                    
+                    distanceToTarget = calculateDistance(locationData.lat, locationData.lng, state.settings.targetLat, state.settings.targetLng);
+                    
+                    if (distanceToTarget > state.settings.geofenceRadius) {
+                        if(btn) { btn.innerText = "MARK ATTENDANCE"; btn.disabled = false; }
+                        if (isTermActive) { livenessVerified = false; blinkFrames = 0; runLivenessDetection(); }
+                        if(gpsStat) {
+                            gpsStat.innerText = `OUT OF RANGE (${Math.round(distanceToTarget)}m) ❌`;
+                            gpsStat.className = "text-rose-500 font-bold";
+                        }
+                        return showToast(`Geofence failed! You are ${Math.round(distanceToTarget)}m away from the authorized zone.`, "error");
+                    }
+                    
+                    if(gpsStat) {
+                        gpsStat.innerText = `LOCKED (${Math.round(distanceToTarget)}m) ✅`;
+                        gpsStat.className = "text-emerald-400 font-bold";
+                    }
+                } catch (e) {
+                    if(btn) { btn.innerText = "MARK ATTENDANCE"; btn.disabled = false; }
+                    if (isTermActive) { livenessVerified = false; blinkFrames = 0; runLivenessDetection(); }
+                    if(gpsStat) { gpsStat.innerText = "FAILED ❌"; gpsStat.className = "text-rose-500 font-bold"; }
+                    
+                    let errMsg = "Location required to mark attendance. Please allow GPS access.";
+                    if (e.code === 1) errMsg = "Location access denied! Please enable GPS in browser settings.";
+                    else if (e.code === 2) errMsg = "Location unavailable. Please check your device's GPS signal.";
+                    else if (e.code === 3) errMsg = "Location request timed out. Please try again.";
+                    
+                    return showToast(errMsg, "error");
+                }
+            } else {
+                if(gpsStat) {
+                    gpsStat.innerText = "DISABLED";
+                    gpsStat.className = "text-slate-500 font-bold";
+                }
+            }
+
+            if(btn) btn.innerText = "SCANNING FACE...";
+            if(canvasEl) canvasEl.getContext('2d').clearRect(0, 0, canvasEl.width, canvasEl.height);
+
+            try {
+                const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 });
+                const detection = await faceapi.detectSingleFace(videoEl, options).withFaceLandmarks().withFaceDescriptor();
+                
+                if (!detection) {
+                    showToast("No face detected! Look directly at the camera.", "error");
+                } else {
+                    if(canvasEl) {
+                        const resizedDetections = faceapi.resizeResults(detection, { width: videoEl.videoWidth, height: videoEl.videoHeight });
+                        faceapi.draw.drawDetections(canvasEl, resizedDetections);
+                        setTimeout(() => canvasEl.getContext('2d').clearRect(0, 0, canvasEl.width, canvasEl.height), 2000); 
+                    }
+
+                    let bestMatch = { user: null, distance: 1.0 }; 
+                    state.users.forEach(u => {
+                        const savedDescriptor = new Float32Array(u.descriptor);
+                        const d = faceapi.euclideanDistance(detection.descriptor, savedDescriptor);
+                        if (d < bestMatch.distance) bestMatch = { user: u, distance: d };
+                    });
+
+                    if (bestMatch.distance < state.settings.matchThreshold) {
+                        const u = bestMatch.user; 
+                        const dt = new Date();
+                        const todayStr = dt.toDateString();
+                        const todayLogs = state.logs.filter(l => l.employeeId === u.id && new Date(l.timestamp).toDateString() === todayStr);
+                        
+                        let type = 'Present'; let duration = '-';
+
+                        if (todayLogs.length > 0) {
+                            const lastLog = todayLogs[0];
+                            if (lastLog.type === 'Present') {
+                                type = 'Departed';
+                                const diffMs = Date.now() - new Date(lastLog.timestamp).getTime();
+                                const hrs = Math.floor(diffMs / 3600000);
+                                const mins = Math.round(((diffMs % 3600000) / 60000));
+                                duration = `${hrs}h ${mins}m`;
+                            }
+                        }
+
+                        const isLate = (type === 'Present') ? checkIfLate(dt) : false;
+
+                        const newLog = {
+                            id: `log_${Date.now()}`, employeeId: u.id, employee: u.name, dept: u.dept,
+                            timestamp: dt.toISOString(), displayDate: dt.toLocaleDateString(), displayTime: dt.toLocaleTimeString(),
+                            type: type, duration: duration, location: locationData, distance: distanceToTarget,
+                            isLate: isLate
+                        };
+                        
+                        // Auto-cancel leave if they show up
+                        if (u.leaveUntil && new Date(u.leaveUntil) >= new Date(dt.setHours(0,0,0,0))) {
+                            u.leaveUntil = null;
+                            showToast(`Welcome back, ${u.name}! Leave automatically cancelled.`, "blue");
+                        }
+
+                        state.logs.unshift(newLog); saveData();
+                        
+                        if (isLate) {
+                            showToast(`${type} Marked Successfully (LATE): ${u.name}`, "error");
+                        } else {
+                            showToast(`${type} Marked Successfully: ${u.name}`, "success");
+                        }
+                        
+                        logToTerminalUI(newLog);
+                    } else {
+                        showToast("Face not recognized!", "error");
+                    }
+                }
+            } catch (err) { 
+                showToast("Error processing face scan.", "error"); 
+            } finally {
+                if (isTermActive) {
+                    livenessVerified = false;
+                    blinkFrames = 0;
+                    const liveStat = document.getElementById('term-liveness-status');
+                    if(liveStat) {
+                        liveStat.innerText = "WAITING FOR BLINK...";
+                        liveStat.className = "text-amber-400 font-bold animate-pulse";
+                    }
+                    if(btn) {
+                        btn.disabled = true;
+                        btn.innerText = "BLINK TO UNLOCK";
+                    }
+                    runLivenessDetection(); 
+                }
+            }
+        }
+
+        async function registerUser() {
+            if (!isAdminUnlocked) return showToast("Admin access required.", "error");
+
+            const empIdInput = document.getElementById('reg-emp-id');
+            const nameInput = document.getElementById('reg-name');
+            const roleInput = document.getElementById('reg-role');
+            const deptInput = document.getElementById('reg-dept');
+            
+            if(!empIdInput || !nameInput || !roleInput || !deptInput) return;
+
+            const empId = empIdInput.value.trim();
+            const name = nameInput.value.trim();
+            const role = roleInput.value.trim();
+            const dept = deptInput.value;
+            
+            if (!empId || !name || !role || !dept) return showToast("Please fill all form fields.", "error");
+            
+            if (state.users.some(u => u.empId.toLowerCase() === empId.toLowerCase())) {
+                return showToast("Employee ID already exists. Please use a unique ID.", "error");
+            }
+            
+            const videoEl = document.getElementById('reg-webcam');
+            if (!isRegActive || !videoEl || videoEl.paused) return showToast("Please start the registration camera first.", "error");
+
+            const btn = document.getElementById('btn-register');
+            if(btn) { btn.innerText = "Extracting Features..."; btn.disabled = true; }
+
+            try {
+                const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 });
+                const detection = await faceapi.detectSingleFace(videoEl, options).withFaceLandmarks().withFaceDescriptor();
+                
+                if (!detection) {
+                    showToast("No face detected! Look directly at the camera.", "error");
+                    if(btn) { btn.innerText = "EXTRACT FACE & REGISTER"; btn.disabled = false; }
+                } else {
+                    let bestMatch = { user: null, distance: 1.0 }; 
+                    state.users.forEach(u => {
+                        const savedDescriptor = new Float32Array(u.descriptor);
+                        const d = faceapi.euclideanDistance(detection.descriptor, savedDescriptor);
+                        if (d < bestMatch.distance) bestMatch = { user: u, distance: d };
+                    });
+
+                    if (bestMatch.user && bestMatch.distance < state.settings.matchThreshold) {
+                        showToast(`This face is already registered to ${bestMatch.user.name}.`, "error");
+                        if(btn) { btn.innerText = "EXTRACT FACE & REGISTER"; btn.disabled = false; }
+                        return;
+                    }
+
+                    const cropCanvas = document.createElement('canvas'); 
+                    cropCanvas.width = 100; cropCanvas.height = 100;
+                    const ctx = cropCanvas.getContext('2d');
+                    ctx.translate(100, 0); ctx.scale(-1, 1);
+                    ctx.drawImage(videoEl, detection.detection.box.x, detection.detection.box.y, detection.detection.box.width, detection.detection.box.height, 0, 0, 100, 100);
+                    
+                    state.users.push({
+                        id: `usr_${Date.now()}`, empId: empId, name: name, role: role, dept: dept, image: cropCanvas.toDataURL(), descriptor: Array.from(detection.descriptor), leaveUntil: null
+                    });
+                    
+                    saveData();
+                    showToast(`Success! Enrolled ${name}.`, "success");
+                    
+                    empIdInput.value = '';
+                    nameInput.value = '';
+                    roleInput.value = '';
+                    deptInput.value = '';
+
+                    if(btn) btn.innerText = "REGISTRATION SUCCESSFUL!";
+                    const overlay = document.getElementById('reg-success-overlay');
+                    if(overlay) {
+                        overlay.classList.remove('hidden');
+                        setTimeout(() => overlay.classList.remove('opacity-0'), 10);
+
+                        setTimeout(() => {
+                            overlay.classList.add('opacity-0');
+                            setTimeout(() => {
+                                overlay.classList.add('hidden');
+                                stopRegCamera();
+                                if(btn) btn.innerText = "EXTRACT FACE & REGISTER"; 
+                            }, 300);
+                        }, 1500);
+                    } else {
+                        stopRegCamera();
+                        if(btn) btn.innerText = "EXTRACT FACE & REGISTER";
+                    }
+                }
+            } catch (err) { 
+                showToast("Registration error occurred.", "error"); 
+                if(btn) { btn.innerText = "EXTRACT FACE & REGISTER"; btn.disabled = false; }
+            }
+        }
+
+        function logToTerminalUI(log) {
+            const list = document.getElementById('terminal-log');
+            if(!list) return;
+            if (list.children[0]?.classList.contains('italic')) list.innerHTML = '';
+            
+            const c = log.type === 'Present' ? 'emerald' : 'blue';
+            let locHTML = log.location ? `<span class="text-[8px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-800 px-1 rounded ml-1 border border-slate-200 dark:border-slate-700">📍 ${log.distance !== null ? Math.round(log.distance) + 'm' : 'GPS'}</span>` : '';
+            let lateHTML = log.isLate ? `<span class="text-[8px] font-bold text-amber-700 bg-amber-100 px-1 rounded ml-1 border border-amber-200">LATE</span>` : '';
+            
+            const logItem = `
+            <div class="p-2 border-l-4 border-${c}-500 bg-${c}-50 dark:bg-${c}-900/30 rounded flex justify-between items-center text-sm mb-2 animate-fade-in">
+                <div><p class="font-bold text-erp-dark dark:text-white flex items-center">${log.employee} ${locHTML}</p><p class="text-[10px] text-erp-secondary dark:text-slate-400">${log.displayDate}</p></div>
+                <div class="text-right"><p class="font-bold text-${c}-700 dark:text-${c}-400 flex items-center gap-1 justify-end">${lateHTML} ${log.type}</p><p class="text-[10px] text-${c}-600 dark:text-${c}-500 font-bold">${log.displayTime}</p></div>
+            </div>`;
+            list.insertAdjacentHTML('afterbegin', logItem);
+        }
+        
+        // --- DASHBOARD CHARTS ---
+        function updateDashboardData() {
+            const dateOptions = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+            const dashDateEl = document.getElementById('dash-current-date');
+            if (dashDateEl) dashDateEl.innerText = new Date().toLocaleDateString('en-US', dateOptions);
+
+            const kpiTotal = document.getElementById('kpi-total');
+            if(kpiTotal) kpiTotal.innerText = state.users.length;
+            
+            const shiftTimeEl = document.getElementById('kpi-shift-time');
+            if(shiftTimeEl) shiftTimeEl.innerText = state.settings.shiftStart || '09:00';
+
+            const todayLogs = state.logs.filter(l => new Date(l.timestamp).toDateString() === new Date().toDateString());
+            
+            let presentSet = new Set(), lateCount = 0;
+
+            todayLogs.forEach(l => {
+                if(l.type === 'Present' && !presentSet.has(l.employeeId)) {
+                    presentSet.add(l.employeeId);
+                    if(l.isLate) lateCount++;
+                }
+            });
+            
+            let onLeaveCount = 0;
+            const todayReset = new Date().setHours(0,0,0,0);
+            state.users.forEach(u => {
+                if (u.leaveUntil && new Date(u.leaveUntil) >= new Date(todayReset) && !presentSet.has(u.id)) {
+                    onLeaveCount++;
+                }
+            });
+            
+            const absentCount = Math.max(0, state.users.length - presentSet.size - onLeaveCount);
+            
+            const presentEl = document.getElementById('kpi-present');
+            if(presentEl) presentEl.innerText = presentSet.size;
+            
+            const lateEl = document.getElementById('kpi-late');
+            if(lateEl) lateEl.innerText = lateCount;
+            
+            const absentEl = document.getElementById('kpi-absent');
+            if(absentEl) absentEl.innerText = absentCount;
+            
+            const leaveEl = document.getElementById('kpi-leave-text');
+            if(leaveEl) leaveEl.innerText = `(${onLeaveCount} on leave)`;
+
+            const totalUsers = Math.max(1, state.users.length); 
+            const attendanceRate = Math.round((presentSet.size / totalUsers) * 100);
+            
+            const rateText = document.getElementById('kpi-rate-text');
+            const rateBar = document.getElementById('kpi-rate-bar');
+            if (rateText && rateBar) {
+                rateText.innerText = `${attendanceRate}%`;
+                rateBar.style.width = `${attendanceRate}%`;
+                rateText.className = `text-sm font-bold mb-1 ${attendanceRate >= 80 ? 'text-emerald-500' : (attendanceRate >= 50 ? 'text-amber-500' : 'text-rose-500')}`;
+                rateBar.className = `h-1.5 rounded-full transition-all duration-1000 ${attendanceRate >= 80 ? 'bg-emerald-500' : (attendanceRate >= 50 ? 'bg-amber-400' : 'bg-rose-500')}`;
+            }
+
+            const dashLogsList = document.getElementById('dash-recent-logs');
+            if (dashLogsList) {
+                dashLogsList.innerHTML = '';
+                const recentLogs = state.logs.slice(0, 5);
+                
+                if (recentLogs.length === 0) {
+                    dashLogsList.innerHTML = `<tr><td colspan="4" class="px-6 py-8 text-center text-slate-400 italic">No recent activity logged today.</td></tr>`;
+                } else {
+                    recentLogs.forEach(l => {
+                        const isPresent = l.type === 'Present';
+                        const badgeClass = isPresent ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800' : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800';
+                        const uInfo = state.users.find(u => u.id === l.employeeId);
+                        const empIdDisplay = uInfo && uInfo.empId ? `<span class="text-[10px] text-slate-400 font-mono ml-2 block sm:inline">${uInfo.empId}</span>` : '';
+                        let lateHTML = l.isLate ? `<span class="text-[10px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full ml-2 border border-amber-200">LATE</span>` : '';
+
+                        dashLogsList.insertAdjacentHTML('beforeend', `
+                            <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
+                                <td class="px-6 py-3 whitespace-nowrap"><div class="font-bold text-erp-dark dark:text-white text-sm">${l.employee} ${empIdDisplay}</div></td>
+                                <td class="px-6 py-3 whitespace-nowrap text-xs text-slate-500 dark:text-slate-400 font-medium">${l.dept}</td>
+                                <td class="px-6 py-3 whitespace-nowrap text-xs font-mono text-slate-600 dark:text-slate-300">${l.displayTime} <span class="text-[10px] text-slate-400 ml-1 hidden sm:inline">${l.displayDate}</span></td>
+                                <td class="px-6 py-3 whitespace-nowrap text-right"><span class="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide rounded-full border ${badgeClass}">${l.type}</span> ${lateHTML}</td>
+                            </tr>
+                        `);
+                    });
+                }
+            }
+
+            const deptChartCanvas = document.getElementById('deptChart');
+            if(deptChartCanvas) { 
+                const isDark = document.documentElement.classList.contains('dark');
+                const chartTextColor = isDark ? '#94a3b8' : '#64748b';
+                
+                const deptCounts = {}; state.users.forEach(u => deptCounts[u.dept] = (deptCounts[u.dept] || 0) + 1);
+                if(deptChartInst) deptChartInst.destroy();
+                deptChartInst = new Chart(deptChartCanvas.getContext('2d'), {
+                    type: 'doughnut', data: { labels: Object.keys(deptCounts), datasets: [{ data: Object.values(deptCounts), backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#6366f1', '#8b5cf6', '#ec4899'], borderColor: isDark ? '#1e293b' : '#ffffff', borderWidth: 2 }] },
+                    options: { responsive: true, maintainAspectRatio: false, cutout: '75%', plugins: { legend: { position: 'bottom', labels: { color: chartTextColor, padding: 20, usePointStyle: true } } } }
+                });
+            }
+
+            const trendChartCanvas = document.getElementById('attendanceTrendChart');
+            if(trendChartCanvas) {
+                const isDark = document.documentElement.classList.contains('dark');
+                const chartTextColor = isDark ? '#94a3b8' : '#64748b';
+                const gridColor = isDark ? '#334155' : '#e2e8f0';
+                
+                const filterEl = document.getElementById('trend-time-filter');
+                const daysToFilter = filterEl ? parseInt(filterEl.value) : 7;
+                const labels = [];
+                const dataData = [];
+                
+                for (let i = daysToFilter - 1; i >= 0; i--) {
+                    const d = new Date();
+                    d.setDate(d.getDate() - i);
+                    
+                    if (daysToFilter <= 7) {
+                        labels.push(d.toLocaleDateString('en-US', { weekday: 'short' }));
+                    } else {
+                        labels.push(d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+                    }
+                    
+                    const historicalStr = d.toDateString();
+                    const dayLogs = state.logs.filter(l => new Date(l.timestamp).toDateString() === historicalStr);
+                    const uniquePresent = new Set();
+                    dayLogs.forEach(l => { if(l.type === 'Present') uniquePresent.add(l.employeeId); });
+                    
+                    dataData.push(uniquePresent.size);
+                }
+
+                if(trendChartInst) trendChartInst.destroy();
+                trendChartInst = new Chart(trendChartCanvas.getContext('2d'), {
+                    type: 'line', 
+                    data: { labels: labels, datasets: [{ label: 'Present Employees', data: dataData, borderColor: '#6366f1', backgroundColor: isDark ? 'rgba(99, 102, 241, 0.15)' : 'rgba(99, 102, 241, 0.1)', borderWidth: 3, fill: true, tension: 0.4, pointBackgroundColor: isDark ? '#1e293b' : '#ffffff', pointBorderColor: '#6366f1', pointBorderWidth: 2, pointRadius: 4, pointHoverRadius: 6 }] },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } }, scales: { x: { ticks: { color: chartTextColor, font: {size: 11} }, grid: { display: false } }, y: { ticks: { color: chartTextColor, stepSize: 1, font: {size: 11} }, grid: { color: gridColor, borderDash: [4, 4] }, beginAtZero: true } }, interaction: { mode: 'nearest', axis: 'x', intersect: false } }
+                });
+            }
+        }
+
+        // --- USER MANAGEMENT & MANUAL PUNCH / LEAVE ---
+        function filterUsers() { renderUserGrid(); }
+        
+        function renderUserGrid() {
+            const grid = document.getElementById('user-grid'); 
+            if(!grid) return;
+            grid.innerHTML = '';
+            
+            const searchEl = document.getElementById('search-user');
+            const deptEl = document.getElementById('filter-user-dept');
+            const statusEl = document.getElementById('filter-user-status');
+            
+            const query = searchEl ? searchEl.value.toLowerCase() : '';
+            const deptFilter = deptEl ? deptEl.value : '';
+            const statusFilter = statusEl ? statusEl.value : '';
+
+            const todayObj = new Date();
+            const todayStr = todayObj.toDateString();
+            const todayReset = todayObj.setHours(0,0,0,0);
+
+            let filtered = state.users.filter(u => {
+                // Search Match
+                const matchesSearch = u.name.toLowerCase().includes(query) || (u.empId && u.empId.toLowerCase().includes(query));
+                if (!matchesSearch) return false;
+                
+                // Department Match
+                if (deptFilter && u.dept !== deptFilter) return false;
+                
+                // Status Match
+                if (statusFilter) {
+                    const userLogs = state.logs.filter(l => l.employeeId === u.id);
+                    const isPresent = userLogs.some(l => new Date(l.timestamp).toDateString() === todayStr && l.type === 'Present');
+                    const isOnLeave = u.leaveUntil && new Date(u.leaveUntil) >= new Date(todayReset);
+                    
+                    if (statusFilter === 'Present' && !isPresent) return false;
+                    if (statusFilter === 'Leave' && !isOnLeave) return false;
+                    if (statusFilter === 'Absent' && (isPresent || isOnLeave)) return false;
+                }
+                
+                return true;
+            });
+            
+            const countBadge = document.getElementById('user-count-badge');
+            if(countBadge) countBadge.innerText = `Showing: ${filtered.length}`;
+
+            const noUsersMsg = document.getElementById('no-users-msg');
+            if(noUsersMsg) noUsersMsg.classList.toggle('hidden', filtered.length > 0);
+
+            const allSystemDates = new Set();
+            state.logs.forEach(l => allSystemDates.add(new Date(l.timestamp).toDateString()));
+            allSystemDates.add(todayStr);
+
+            filtered.forEach(u => {
+                const userLogs = state.logs.filter(l => l.employeeId === u.id);
+                const isPresent = userLogs.some(l => new Date(l.timestamp).toDateString() === todayStr && l.type === 'Present');
+                const isOnLeave = u.leaveUntil && new Date(u.leaveUntil) >= new Date(todayReset);
+                
+                let dotColor = 'bg-rose-500';
+                if (isPresent) dotColor = 'bg-emerald-500';
+                else if (isOnLeave) dotColor = 'bg-purple-500';
+                
+                const leaveBadge = isOnLeave ? `<div class="absolute -top-2 -right-2 bg-purple-100 dark:bg-purple-900 border border-purple-300 dark:border-purple-600 text-purple-700 dark:text-purple-300 text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-sm">🏖️ LEAVE</div>` : '';
+                
+                const userPresentDates = new Set();
+                userLogs.forEach(l => {
+                    if (l.type === 'Present') userPresentDates.add(new Date(l.timestamp).toDateString());
+                });
+                
+                let regTime = parseInt(u.id.split('_')[1]);
+                if (isNaN(regTime)) regTime = Date.now();
+                const regDate = new Date(regTime);
+                regDate.setHours(0, 0, 0, 0);
+
+                let eligibleDays = 0;
+                allSystemDates.forEach(dateStr => {
+                    const sysDate = new Date(dateStr);
+                    sysDate.setHours(0, 0, 0, 0);
+                    if (sysDate.getTime() >= regDate.getTime()) {
+                        eligibleDays++;
+                    }
+                });
+                
+                const presentCount = userPresentDates.size;
+                const attendancePct = eligibleDays > 0 ? Math.round((presentCount / eligibleDays) * 100) : 0;
+                const pctColor = attendancePct >= 80 ? 'text-emerald-500' : (attendancePct >= 50 ? 'text-amber-500' : 'text-rose-500');
+                
+                grid.insertAdjacentHTML('beforeend', `
+                    <div class="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col items-center gap-2 relative group hover:border-erp-primary transition-colors mt-2">
+                        ${leaveBadge}
+                        <div class="absolute top-2 left-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onclick="openManualPunch('${u.id}')" class="w-7 h-7 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-emerald-500 hover:text-white rounded flex items-center justify-center text-sm shadow-sm" title="Manual Punch">⏱️</button>
+                            <button onclick="openLeaveModal('${u.id}')" class="w-7 h-7 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-purple-500 hover:text-white rounded flex items-center justify-center text-sm shadow-sm" title="Manage Leave">🏖️</button>
+                        </div>
+                        <div class="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onclick="openEditUser('${u.id}')" class="w-7 h-7 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-blue-500 dark:hover:bg-blue-600 hover:text-white rounded flex items-center justify-center text-sm shadow-sm" title="Edit">✎</button>
+                            <button onclick="deleteUser('${u.id}')" class="w-7 h-7 bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 hover:bg-rose-500 hover:text-white rounded flex items-center justify-center text-sm shadow-sm" title="Delete">✕</button>
+                        </div>
+                        <div class="relative mt-2">
+                            <img src="${u.image}" class="w-16 h-16 rounded-full object-cover border-2 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
+                            <div class="absolute bottom-0 right-0 w-4 h-4 ${dotColor} border-2 border-white dark:border-slate-800 rounded-full shadow-sm"></div>
+                        </div>
+                        <div class="text-center w-full mt-1">
+                            <p class="text-sm font-bold text-erp-dark dark:text-white truncate">${u.name}</p>
+                            <p class="text-[10px] text-erp-secondary dark:text-slate-400 truncate">${u.role || 'Employee'} • <span class="font-mono">${u.empId || 'N/A'}</span></p>
+                            <p class="text-[9px] font-bold text-erp-primary truncate uppercase tracking-wider mt-0.5">${u.dept}</p>
+                        </div>
+                        
+                        <div class="w-full bg-slate-50 dark:bg-slate-700/50 rounded p-2 mt-1 flex justify-between items-center text-[10px] border border-slate-100 dark:border-slate-600">
+                            <div class="flex flex-col items-start">
+                                <span class="text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">Presence</span>
+                                <span class="font-bold text-erp-dark dark:text-slate-200">${presentCount} / ${eligibleDays}</span>
+                            </div>
+                            <div class="flex flex-col items-end">
+                                <span class="text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">Rate</span>
+                                <span class="font-bold ${pctColor} text-xs">${attendancePct}%</span>
+                            </div>
+                        </div>
+                    </div>`);
+            });
+        }
+
+        function deleteUser(id) {
+            if (!isAdminUnlocked) return showToast("Admin access required.", "error");
+            if(confirm("Delete this user and completely erase their facial recognition data?")) {
+                state.users = state.users.filter(u => u.id !== id);
+                saveData(); showToast("User deleted successfully.", "success");
+            }
+        }
+
+        function openEditUser(id) {
+            if (!isAdminUnlocked) return showToast("Admin access required.", "error");
+            const u = state.users.find(x => x.id === id);
+            
+            const editId = document.getElementById('edit-id');
+            const editEmpId = document.getElementById('edit-emp-id');
+            const editName = document.getElementById('edit-name');
+            const editRole = document.getElementById('edit-role');
+            const editDept = document.getElementById('edit-dept');
+            const modal = document.getElementById('edit-user-modal');
+
+            if(editId) editId.value = u.id;
+            if(editEmpId) editEmpId.value = u.empId || '';
+            if(editName) editName.value = u.name;
+            if(editRole) editRole.value = u.role || '';
+            if(editDept) editDept.value = u.dept;
+            if(modal) modal.classList.remove('hidden');
+        }
+
+        function saveUserEdit() {
+            const editId = document.getElementById('edit-id');
+            const editEmpId = document.getElementById('edit-emp-id');
+            if(!editId || !editEmpId) return;
+
+            const id = editId.value;
+            const newEmpId = editEmpId.value.trim();
+            
+            if (state.users.some(u => u.id !== id && u.empId.toLowerCase() === newEmpId.toLowerCase())) {
+                return showToast("Employee ID already exists.", "error");
+            }
+            
+            const u = state.users.find(x => x.id === id);
+            u.empId = newEmpId;
+            
+            const editName = document.getElementById('edit-name');
+            if(editName) u.name = editName.value; 
+            
+            const editRole = document.getElementById('edit-role');
+            if(editRole) u.role = editRole.value;
+            
+            const editDept = document.getElementById('edit-dept');
+            if(editDept) u.dept = editDept.value;
+            
+            state.logs.forEach(l => { if(l.employeeId === id) { l.employee = u.name; l.dept = u.dept; }});
+            saveData(); closeModals(); showToast("Profile updated successfully.");
+        }
+
+        function openManualPunch(id) {
+            if (!isAdminUnlocked) return showToast("Admin access required.", "error");
+            const u = state.users.find(x => x.id === id);
+            
+            document.getElementById('punch-id').value = u.id;
+            document.getElementById('punch-name-display').innerText = u.name;
+            
+            const now = new Date();
+            document.getElementById('punch-date').value = now.toISOString().split('T')[0];
+            document.getElementById('punch-time').value = now.toTimeString().slice(0,5);
+            document.getElementById('punch-note').value = '';
+            
+            document.getElementById('manual-punch-modal').classList.remove('hidden');
+        }
+
+        function saveManualPunch() {
+            const id = document.getElementById('punch-id').value;
+            const u = state.users.find(x => x.id === id);
+            
+            const pType = document.getElementById('punch-type').value;
+            const pDate = document.getElementById('punch-date').value;
+            const pTime = document.getElementById('punch-time').value;
+            const pNote = document.getElementById('punch-note').value.trim();
+            
+            if (!pDate || !pTime) return showToast("Please select date and time.", "error");
+            
+            const dt = new Date(`${pDate}T${pTime}:00`);
+            const isLate = (pType === 'Present') ? checkIfLate(dt) : false;
+
+            const newLog = {
+                id: `log_${Date.now()}`, employeeId: u.id, employee: u.name, dept: u.dept,
+                timestamp: dt.toISOString(), displayDate: dt.toLocaleDateString(), displayTime: dt.toLocaleTimeString(),
+                type: pType, duration: '-', location: null, distance: null, isLate: isLate,
+                note: pNote || "Manual Punch"
+            };
+            
+            // Clear leave if clocking in
+            if (u.leaveUntil && new Date(u.leaveUntil) >= new Date(dt.setHours(0,0,0,0))) {
+                u.leaveUntil = null;
+            }
+
+            state.logs.unshift(newLog); saveData();
+            closeModals();
+            showToast(`Manual Punch (${pType}) saved for ${u.name}.`, "success");
+        }
+
+        function openLeaveModal(id) {
+            if (!isAdminUnlocked) return showToast("Admin access required.", "error");
+            const u = state.users.find(x => x.id === id);
+            
+            document.getElementById('leave-id').value = u.id;
+            document.getElementById('leave-name-display').innerText = u.name;
+            
+            const lDate = document.getElementById('leave-date');
+            if (u.leaveUntil) {
+                lDate.value = u.leaveUntil.split('T')[0];
+            } else {
+                lDate.value = '';
+            }
+            
+            document.getElementById('leave-modal').classList.remove('hidden');
+        }
+
+        function saveLeave() {
+            const id = document.getElementById('leave-id').value;
+            const u = state.users.find(x => x.id === id);
+            const dateVal = document.getElementById('leave-date').value;
+            
+            if (!dateVal) return showToast("Please select an end date for the leave.", "error");
+            
+            u.leaveUntil = new Date(`${dateVal}T23:59:59`).toISOString();
+            saveData(); closeModals();
+            showToast(`${u.name} marked on leave until ${dateVal}.`, "success");
+        }
+
+        function clearLeave() {
+            const id = document.getElementById('leave-id').value;
+            const u = state.users.find(x => x.id === id);
+            u.leaveUntil = null;
+            saveData(); closeModals();
+            showToast(`Leave cancelled for ${u.name}.`, "success");
+        }
+
+        // --- REPORTS & FILTERING ---
+        function clearFilters() {
+            const fDate = document.getElementById('filter-date');
+            if(fDate) fDate.value = ''; 
+            const fDept = document.getElementById('filter-dept');
+            if(fDept) fDept.value = ''; 
+            const fType = document.getElementById('filter-type');
+            if(fType) fType.value = '';
+            renderLogsTable();
+        }
+
+        function renderLogsTable() {
+            const fDateEl = document.getElementById('filter-date');
+            const fDeptEl = document.getElementById('filter-dept');
+            const fTypeEl = document.getElementById('filter-type');
+            
+            const fDate = fDateEl ? fDateEl.value : null;
+            const fDept = fDeptEl ? fDeptEl.value : null;
+            const fType = fTypeEl ? fTypeEl.value : null;
+
+            activeFilteredLogs = state.logs.filter(l => {
+                if(fDate && l.timestamp.split('T')[0] !== fDate) return false;
+                if(fDept && l.dept !== fDept) return false;
+                
+                if (fType) {
+                    if (fType === 'Manual' && !l.note) return false;
+                    if (fType !== 'Manual' && l.type !== fType) return false;
+                }
+                return true;
+            });
+
+            const tbody = document.getElementById('logs-table-body'); 
+            if(!tbody) return;
+            tbody.innerHTML = '';
+            
+            if(activeFilteredLogs.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" class="px-6 py-8 text-center text-slate-400">No attendance records match the selected criteria.</td></tr>`; return;
+            }
+
+            activeFilteredLogs.slice(0, 50).forEach(l => {
+                const c = l.type === 'Present' ? 'text-emerald-600 dark:text-emerald-400' : 'text-blue-600 dark:text-blue-400';
+                
+                let detailsCell = `<span class="text-slate-400 italic">No Location/Note</span>`;
+                if(l.location) {
+                    const mapsLink = `https://www.google.com/maps?q=${l.location.lat},${l.location.lng}`;
+                    detailsCell = `<a href="${mapsLink}" target="_blank" class="text-blue-500 hover:underline text-[10px] bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded">📍 GPS: ${Math.round(l.distance)}m</a>`;
+                } else if (l.note) {
+                    detailsCell = `<span class="text-[10px] bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800 px-2 py-1 rounded flex items-center w-fit gap-1"><span class="text-[10px]">📝</span> ${l.note}</span>`;
+                }
+
+                let lateHTML = l.isLate ? `<span class="text-[9px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full ml-2 border border-amber-200">LATE</span>` : '';
+
+                tbody.insertAdjacentHTML('beforeend', `<tr class="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors group">
+                    <td class="px-6 py-3 whitespace-nowrap text-sm text-erp-secondary dark:text-slate-300">${l.displayDate} <span class="font-bold ml-2 text-slate-700 dark:text-slate-200">${l.displayTime}</span></td>
+                    <td class="px-6 py-3 whitespace-nowrap text-sm font-medium text-erp-dark dark:text-white">${l.employee} <span class="text-[10px] text-slate-400 block">${l.dept}</span></td>
+                    <td class="px-6 py-3 whitespace-nowrap text-xs font-bold ${c} flex items-center">${l.type} ${lateHTML}</td>
+                    <td class="px-6 py-3 whitespace-nowrap text-xs">${detailsCell}</td>
+                    <td class="px-6 py-3 whitespace-nowrap text-xs font-mono text-slate-600 dark:text-slate-400">${l.duration}</td>
+                    <td class="px-6 py-3 whitespace-nowrap text-right no-print">
+                        <button onclick="deleteLog('${l.id}')" class="text-rose-500 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300 hover:underline text-xs font-medium opacity-0 group-hover:opacity-100 transition">Delete</button>
+                    </td>
+                </tr>`);
+            });
+        }
+
+        function deleteLog(id) {
+            if (!isAdminUnlocked) return showToast("Admin access required.", "error");
+            if(confirm("Permanently remove this specific attendance log?")) {
+                state.logs = state.logs.filter(l => l.id !== id); saveData(); showToast("Log entry deleted.");
+            }
+        }
+
+        function exportToCSV() {
+            if (!isAdminUnlocked) return showToast("Admin access required.", "error");
+            if(activeFilteredLogs.length === 0) return showToast("No data to export.", "error");
+            let csv = "Date,Time,Employee,Department,Status,Duration,Latitude,Longitude,Late,Note\n";
+            activeFilteredLogs.forEach(l => {
+                const lat = l.location ? l.location.lat : "";
+                const lng = l.location ? l.location.lng : "";
+                const isLateStr = l.isLate ? "Yes" : "No";
+                const noteStr = l.note ? l.note.replace(/"/g, '""') : "";
+                csv += `"${l.displayDate}","${l.displayTime}","${l.employee}","${l.dept}","${l.type}","${l.duration}","${lat}","${lng}","${isLateStr}","${noteStr}"\n`;
+            });
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = `facetrack_export_${Date.now()}.csv`;
+            a.click(); window.URL.revokeObjectURL(url); showToast("CSV Downloaded successfully.");
+        }
+
+        // --- SETTINGS ---
+        function toggleGeofenceOptions(checked) {
+            const elGeoOptions = document.getElementById('geo-options');
+            if (elGeoOptions) {
+                elGeoOptions.classList.toggle('hidden', !checked);
+                if (checked) {
+                    initSettingsMap();
+                }
+            }
+        }
+
+        function initSettingsMap() {
+            const lat = parseFloat(document.getElementById('set-geo-lat').value) || state.settings.targetLat;
+            const lng = parseFloat(document.getElementById('set-geo-lng').value) || state.settings.targetLng;
+            
+            setTimeout(() => {
+                if (!settingsMap) {
+                    settingsMap = L.map('settings-map').setView([lat, lng], 16);
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        attribution: '© OpenStreetMap'
+                    }).addTo(settingsMap);
+
+                    settingsMarker = L.marker([lat, lng], {draggable: true}).addTo(settingsMap);
+                    
+                    settingsMap.on('click', function(e) {
+                        settingsMarker.setLatLng(e.latlng);
+                        document.getElementById('set-geo-lat').value = e.latlng.lat.toFixed(6);
+                        document.getElementById('set-geo-lng').value = e.latlng.lng.toFixed(6);
+                    });
+
+                    settingsMarker.on('dragend', function(e) {
+                        const pos = settingsMarker.getLatLng();
+                        document.getElementById('set-geo-lat').value = pos.lat.toFixed(6);
+                        document.getElementById('set-geo-lng').value = pos.lng.toFixed(6);
+                    });
+                } else {
+                    settingsMap.setView([lat, lng], 16);
+                    settingsMarker.setLatLng([lat, lng]);
+                }
+                settingsMap.invalidateSize(); 
+            }, 100);
+        }
+
+        function updateMapMarkerFromInputs() {
+            if (!settingsMap || !settingsMarker) return;
+            const lat = parseFloat(document.getElementById('set-geo-lat').value);
+            const lng = parseFloat(document.getElementById('set-geo-lng').value);
+            if (!isNaN(lat) && !isNaN(lng)) {
+                settingsMarker.setLatLng([lat, lng]);
+                settingsMap.setView([lat, lng]);
+            }
+        }
+
+        async function useCurrentLocation(btn) {
+            const originalText = btn.innerHTML;
+            btn.innerHTML = `<span class="animate-spin inline-block">⏳</span> Locating...`;
+            btn.disabled = true;
+
+            try {
+                const pos = await new Promise((resolve, reject) => {
+                    navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 5000 });
+                });
+                
+                const lat = pos.coords.latitude.toFixed(6);
+                const lng = pos.coords.longitude.toFixed(6);
+                
+                document.getElementById('set-geo-lat').value = lat;
+                document.getElementById('set-geo-lng').value = lng;
+                
+                updateMapMarkerFromInputs();
+                showToast("Location updated to your current position.", "success");
+            } catch (err) {
+                showToast("Failed to get location. Please check browser permissions.", "error");
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        function openSettingsModal() {
+            const elThresh = document.getElementById('set-thresh');
+            if (elThresh) elThresh.value = state.settings.matchThreshold;
+            
+            const elThreshVal = document.getElementById('set-thresh-val');
+            if (elThreshVal) elThreshVal.innerText = state.settings.matchThreshold;
+            
+            const elApiKey = document.getElementById('set-api-key');
+            if (elApiKey) elApiKey.value = state.settings.geminiKey || '';
+            
+            const elAiModel = document.getElementById('set-ai-model');
+            if (elAiModel) elAiModel.value = state.settings.aiModel || defaultAiModel;
+            
+            const elShiftStart = document.getElementById('set-shift-start');
+            if (elShiftStart) {
+                elShiftStart.value = state.settings.shiftStart || '09:00';
+            }
+            
+            const elGeofence = document.getElementById('set-geofence');
+            if (elGeofence) {
+                elGeofence.checked = state.settings.geofenceEnabled || false;
+            }
+            
+            const elLat = document.getElementById('set-geo-lat');
+            if (elLat) elLat.value = state.settings.targetLat || 28.6692;
+            
+            const elLng = document.getElementById('set-geo-lng');
+            if (elLng) elLng.value = state.settings.targetLng || 77.4538;
+            
+            const elRad = document.getElementById('set-geo-rad');
+            if (elRad) elRad.value = state.settings.geofenceRadius || 50;
+
+            const elGeoOptions = document.getElementById('geo-options');
+            if (elGeoOptions) {
+                elGeoOptions.classList.toggle('hidden', !state.settings.geofenceEnabled);
+                if (state.settings.geofenceEnabled) {
+                    initSettingsMap();
+                }
+            }
+            
+            const modal = document.getElementById('settings-modal');
+            if(modal) modal.classList.remove('hidden');
+        }
+        
+        function saveSettings() {
+            const elThresh = document.getElementById('set-thresh');
+            if(elThresh) state.settings.matchThreshold = parseFloat(elThresh.value);
+            
+            const elApiKey = document.getElementById('set-api-key');
+            if(elApiKey) state.settings.geminiKey = elApiKey.value.trim();
+            
+            const elAiModel = document.getElementById('set-ai-model');
+            if(elAiModel) state.settings.aiModel = elAiModel.value.trim() || defaultAiModel;
+            
+            const elShiftStart = document.getElementById('set-shift-start');
+            if (elShiftStart) {
+                state.settings.shiftStart = elShiftStart.value;
+            }
+            
+            const elGeofence = document.getElementById('set-geofence');
+            if (elGeofence) {
+                state.settings.geofenceEnabled = elGeofence.checked;
+            }
+            
+            const elLat = document.getElementById('set-geo-lat');
+            if(elLat) state.settings.targetLat = parseFloat(elLat.value) || 28.6692;
+            
+            const elLng = document.getElementById('set-geo-lng');
+            if(elLng) state.settings.targetLng = parseFloat(elLng.value) || 77.4538;
+            
+            const elRad = document.getElementById('set-geo-rad');
+            if(elRad) state.settings.geofenceRadius = parseInt(elRad.value) || 50;
+            
+            saveData(); 
+            closeModals(); 
+            showToast("Settings Saved.");
+        }
+
+        // --- SMART HYBRID GEMINI AI INTEGRATION ---
+        async function fetchGemini(prompt, sysInt) {
+            let userKey = state.settings.geminiKey;
+            let envKey = typeof apiKey !== 'undefined' ? apiKey : ""; 
+            let activeKey = userKey || envKey;
+            if (!activeKey) throw new Error("Missing API Key. Please open Settings and paste your Google Gemini API Key.");
+
+            let modelName = state.settings.aiModel || defaultAiModel;
+            let isLocal = (userKey && userKey !== "");
+            if (!isLocal && envKey) modelName = "gemini-2.5-flash-preview-09-2025";
+
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${activeKey}`;
+            const payload = { contents: [{ parts: [{ text: prompt }] }], systemInstruction: { parts: [{ text: sysInt }] } };
+            const delays = [1000, 2000, 4000];
+
+            for (let i = 0; i < 3; i++) {
+                try {
+                    let res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    if (!res.ok) {
+                        const errData = await res.json().catch(() => null);
+                        const errorMsg = errData && errData.error ? errData.error.message : `HTTP ${res.status}`;
+                        
+                        if (isLocal && envKey && (res.status === 403 || res.status === 400 || res.status === 401)) {
+                            console.warn("User key failed, falling back to Canvas Environment key...");
+                            const fallbackUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${envKey}`;
+                            res = await fetch(fallbackUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                            if (!res.ok) {
+                                const fbErr = await res.json().catch(() => null);
+                                throw new Error(`API Error: ${fbErr?.error?.message || res.status}`);
+                            }
+                        } else if (res.status === 400 || res.status === 401 || res.status === 403 || res.status === 404) {
+                             if(errorMsg.includes("API key not valid") || errorMsg.includes("unregistered callers")) throw new Error("Your API Key is invalid or revoked. Please generate a new key at aistudio.google.com");
+                             if(errorMsg.includes("not found") || res.status === 404) throw new Error(`Model not found. Try changing the AI Model Name in settings to 'gemini-1.5-pro' or 'gemini-2.0-flash'.`);
+                             throw new Error(`Google API Error (${res.status}): ${errorMsg}`);
+                        } else { throw new Error(`API Error: ${errorMsg}`); }
+                    }
+                    const data = await res.json();
+                    if (data.candidates && data.candidates.length > 0) return data.candidates[0].content.parts[0].text;
+                    throw new Error("Invalid response from Gemini AI.");
+                } catch (e) {
+                    if (e.message.includes("Google API Error") || e.message.includes("invalid or revoked") || e.message.includes("Model not found")) throw e;
+                    if (i === 2) throw e;
+                    await new Promise(resolve => setTimeout(resolve, delays[i]));
+                }
+            }
+        }
+
+        async function generateDashboardInsights() {
+            const box = document.getElementById('ai-insights-box'), content = document.getElementById('ai-insights-content');
+            if(!box || !content) return;
+            box.classList.remove('hidden'); content.innerHTML = '<span class="animate-pulse font-medium text-indigo-500">Connecting to Gemini AI...</span>';
+            const p = document.getElementById('kpi-present')?.innerText || "0"; 
+            const l = document.getElementById('kpi-late')?.innerText || "0"; 
+            const a = document.getElementById('kpi-absent')?.innerText || "0";
+            try {
+                const res = await fetchGemini(`Present:${p}, Late:${l}, Absent:${a}. Write a 2 sentence HR summary based on these numbers.`, "You are an HR Data Analyst. Return plain text only.");
+                content.innerText = res;
+            } catch(e) { content.innerHTML = `<span class='text-rose-500 font-medium'>${e.message}</span>`; }
+        }
+
+        function askAIToggle() { 
+            const box = document.getElementById('ai-query-box');
+            if(box) box.classList.toggle('hidden'); 
+        }
+
+        async function queryGeminiData() {
+            const promptEl = document.getElementById('ai-prompt');
+            const promptStr = promptEl ? promptEl.value : ''; 
+            if(!promptStr) return;
+            
+            const out = document.getElementById('ai-query-response');
+            if(!out) return;
+            
+            out.classList.remove('hidden'); out.innerHTML = "<span class='animate-pulse font-medium text-indigo-500'>Gemini is analyzing data...</span>";
+            const dataContext = activeFilteredLogs.slice(0,40).map(l => `${l.employee} ${l.type} at ${l.displayTime}`).join('; ');
+            try {
+                const res = await fetchGemini(`User asks: "${promptStr}". Data context: ${dataContext || "None"}. Answer the user's question based ONLY on the provided context.`, "You are a helpful HR assistant querying log data. Keep it brief.");
+                out.innerText = res;
+            } catch(e) { out.innerHTML = `<span class='text-rose-500 font-medium'>${e.message}</span>`; }
+        }
+        
+        async function queryDashboardGemini() {
+            const promptEl = document.getElementById('dash-ai-prompt');
+            const promptStr = promptEl ? promptEl.value : ''; 
+            if(!promptStr) return;
+            
+            const out = document.getElementById('dash-ai-query-response');
+            if(!out) return;
+            
+            out.classList.remove('hidden'); 
+            out.innerHTML = "<span class='animate-pulse font-medium text-purple-500'>Gemini is analyzing today's dashboard data...</span>";
+            
+            const p = document.getElementById('kpi-present')?.innerText || "0"; 
+            const l = document.getElementById('kpi-late')?.innerText || "0"; 
+            const a = document.getElementById('kpi-absent')?.innerText || "0";
+            
+            const dataContext = `Metrics -> Present: ${p}, Late: ${l}, Absent: ${a}. Recent Live Activity: ` + state.logs.slice(0,15).map(l => `${l.employee} ${l.type} (Late: ${l.isLate}) at ${l.displayTime}`).join('; ');
+
+            try {
+                const res = await fetchGemini(`User asks: "${promptStr}". Data context: ${dataContext}. Answer the user's question based ONLY on the provided context.`, "You are a helpful HR assistant analyzing dashboard metrics. Keep the response very brief, direct, and professional.");
+                out.innerText = res;
+            } catch(e) { out.innerHTML = `<span class='text-rose-500 font-medium'>${e.message}</span>`; }
+        }
+
+        // --- UTILS & ROUTING ---
+        function showView(id) {
+            currentView = id;
+            if(id !== 'terminal' && isTermActive) stopTermCamera();
+            if(id !== 'registration' && isRegActive) stopRegCamera();
+
+            document.querySelectorAll('main > section').forEach(s => s.classList.add('hidden'));
+            const targetSection = document.getElementById(`view-${id}`);
+            if(targetSection) targetSection.classList.remove('hidden');
+            
+            if(id === 'dashboard') updateDashboardData();
+            if(id === 'users') renderUserGrid();
+            if(id === 'reports') renderLogsTable();
+            
+            document.querySelectorAll('.nav-item').forEach(el => { el.classList.remove('bg-erp-primary', 'text-white'); el.classList.add('text-erp-secondary', 'dark:text-slate-400', 'hover:bg-slate-50', 'dark:hover:bg-slate-700', 'hover:text-erp-primary'); });
+            const activeBtn = document.getElementById(`nav-${id}`);
+            if (activeBtn) { activeBtn.classList.remove('text-erp-secondary', 'dark:text-slate-400', 'hover:bg-slate-50', 'dark:hover:bg-slate-700', 'hover:text-erp-primary'); activeBtn.classList.add('bg-erp-primary', 'text-white'); }
+        }
+
+        function navTo(id) {
+            if(currentView === id) return;
+            try {
+                history.pushState({ view: id }, '', '#' + id);
+            } catch(e) {}
+            showView(id);
+        }
+        
+        function toggleMobileMenu() { 
+            const m = document.getElementById('mobile-menu'); 
+            if(m) {
+                m.classList.toggle('hidden'); 
+                m.classList.toggle('flex'); 
+            }
+        }
+        
+        function closeModals() { 
+            ['auth-modal', 'admin-modal', 'settings-modal', 'edit-user-modal', 'exit-modal', 'manual-punch-modal', 'leave-modal', 'dash-ai-query-box'].forEach(id => {
+                const el = document.getElementById(id);
+                if(el) el.classList.add('hidden');
+            });
+        }
+
+        window.addEventListener('DOMContentLoaded', initApp);
+    </script>
+</body>
+</html>
